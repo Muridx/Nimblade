@@ -1,4 +1,4 @@
-import { WEAPONS, RELICS, UPGRADE_TREE, DUNGEONS, getHpColor, canUseUltimate, canGuard, getWeeklyCountdown } from './game.js'
+import { WEAPONS, RELICS, UPGRADE_TREE, DUNGEONS, SHARPEN_STONE_TIERS, getHpColor, canUseUltimate, canGuard, getWeeklyCountdown } from './game.js'
 
 // ─── SCREEN UTILS ────────────────────────────────────
 export function showScreen(id) {
@@ -219,7 +219,7 @@ export function renderWeaponSelect(progress) {
 }
 
 // ─── UPGRADE TREE ────────────────────────────────────
-export function renderUpgradeTree(progress) {
+export function renderUpgradeTree(progress, walletAddress = null) {
   const trees = [
     { id: 'survivor', name: 'Survivor', icon: '❤️', nodes: ['tough_skin_1','tough_skin_2','veteran'] },
     { id: 'hunter',   name: 'Hunter',   icon: '🎯', nodes: ['sharp_eyes','pattern_reader','sixth_sense'] },
@@ -235,6 +235,35 @@ export function renderUpgradeTree(progress) {
       <div class="upgrade-gold">🪙 ${progress.gold || 0} Gold</div>
     </div>
     <div class="upgrade-trees">
+      ${(() => {
+        const level = Math.max(0, Math.min(5, (progress.sharpenStoneLevel | 0)))
+        const connected = !!walletAddress
+        return `
+        <div class="upgrade-tree-section nim-section">
+          <div class="upgrade-tree-title nim-title">💎 NIM EXCLUSIVE — Sharpen Stone (+1 HP per tier)</div>
+          <div class="nim-tier-row">
+            ${SHARPEN_STONE_TIERS.map(t => {
+              const owned     = t.tier <= level
+              const isNext    = t.tier === level + 1
+              const canBuy    = isNext && connected
+              const locked    = t.tier > level + 1
+              let label = ''
+              if (owned)            label = '✅ OWNED'
+              else if (locked)      label = `🔒 TIER ${t.tier - 1}`
+              else if (!connected)  label = '🔗 CONNECT WALLET'
+              else                  label = `BUY — ${t.costNim} NIM`
+              return `
+              <div class="nim-tier-card ${owned ? 'owned' : ''} ${locked ? 'locked' : ''} ${canBuy ? 'available' : ''}">
+                <div class="nim-tier-name">${t.name}</div>
+                <div class="nim-tier-bonus">+1 Max HP</div>
+                <button class="nim-buy-btn ${(!canBuy && !owned) ? 'disabled' : ''}"
+                        data-sharpen-tier="${t.tier}"
+                        ${(!canBuy || owned) ? 'disabled' : ''}>${label}</button>
+              </div>`
+            }).join('')}
+          </div>
+        </div>`
+      })()}
       ${trees.map(tree => `
       <div class="upgrade-tree-section">
         <div class="upgrade-tree-title">${tree.icon} ${tree.name}</div>

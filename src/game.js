@@ -105,6 +105,30 @@ export const UPGRADE_TREE = {
   master_combatant:  { id: 'master_combatant',  name: 'Master Combatant',  tree: 'ultimate', cost: 750, desc: 'Start each battle with 25 Energy.', requires: 'battle_experience' },
 }
 
+// ─── NIM EXCLUSIVE: SHARPEN STONE TIERS ─────────────────────────
+// 5-tier permanent upgrade purchased with NIM. Each tier grants +1 Max HP.
+// Tiers are sequential: must own tier N-1 before buying tier N.
+// Prices are intentionally low; tune later by editing `costNim` only.
+export const SHARPEN_STONE_TIERS = [
+  { tier: 1, name: 'Sharpen Stone I',   costNim: 1, hpBonus: 1 },
+  { tier: 2, name: 'Sharpen Stone II',  costNim: 2, hpBonus: 1 },
+  { tier: 3, name: 'Sharpen Stone III', costNim: 3, hpBonus: 1 },
+  { tier: 4, name: 'Sharpen Stone IV',  costNim: 5, hpBonus: 1 },
+  { tier: 5, name: 'Sharpen Stone V',   costNim: 8, hpBonus: 1 },
+]
+
+// Returns the next tier the player can buy, or null if maxed out.
+export function getNextSharpenTier(currentLevel = 0) {
+  const lvl = Math.max(0, Math.min(5, currentLevel | 0))
+  if (lvl >= 5) return null
+  return SHARPEN_STONE_TIERS[lvl]  // tier index = current level (0-based)
+}
+
+// Returns total +HP from Sharpen Stone at this level.
+export function getSharpenStoneHpBonus(currentLevel = 0) {
+  return Math.max(0, Math.min(5, currentLevel | 0))
+}
+
 // ─── DUNGEONS ────────────────────────────────────────────────────────────────
 export const DUNGEONS = [
   { id: 1,  name: 'Goblin Camp',     theme: 'forest',   bg: '/assets/arena_battle.png', gold: 50,  stages: [{ monster: 'goblin_scout' }, { monster: 'goblin_archer' }, { monster: 'goblin_shaman' }, { monster: 'goblin_warrior', isElite: true }, { monster: 'goblin_king', isBoss: true }] },
@@ -579,11 +603,13 @@ export function checkSecondWind(playerState) {
 }
 
 // ─── PLAYER STATE ────────────────────────────────────────────────────────────
-export function createRunState(weapon, upgrades = {}) {
+export function createRunState(weapon, upgrades = {}, sharpenStoneLevel = 0) {
   let maxHp = 100
   if (upgrades.tough_skin_1) maxHp += 5
   if (upgrades.tough_skin_2) maxHp += 10
   if (upgrades.veteran)      maxHp += 20
+  // Sharpen Stone (NIM-paid): +1 max HP per tier owned, capped 0–5.
+  maxHp += Math.max(0, Math.min(5, sharpenStoneLevel | 0))
 
   const startEnergy = upgrades.master_combatant ? 25 : 0
 
@@ -664,6 +690,7 @@ export function getDefaultProgress() {
     highestDungeon: 0,
     unlockedWeapons: ['sword'],
     upgrades: {},
+    sharpenStoneLevel: 0,
     weeklyPoints: 0,
     lastReset: Date.now(),
   }

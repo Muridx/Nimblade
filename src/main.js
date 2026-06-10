@@ -12,6 +12,7 @@ import {
   unlockWeapon, purchaseUpgrade,
   canUseUltimate, canGuard, getMoveImage,
   rollChaosBuff,
+  SHARPEN_STONE_TIERS, getNextSharpenTier,
 } from './game.js'
 
 import {
@@ -19,8 +20,12 @@ import {
   syncProgress, recordDungeonClear, recordRunFailed,
   purchaseUpgradeDB, unlockWeaponDB,
   checkWeeklyReset, getLeaderboard,
-  submitPracticeScore, migratePracticeToWallet,
+  incrementSharpenStone, logNimPurchase,
 } from './supabase.js'
+
+import {
+  connectWallet, disconnectWallet, payNim, NIMBLADE_RECIPIENT,
+} from './nimiq.js'
 
 import {
   showScreen, showNav, setActiveNav,
@@ -41,11 +46,7 @@ let progress = loadProgress() || getDefaultProgress()
 
 // Session info
 let walletAddress = null
-let deviceId      = null            // Nimiq Pay device identifier (or local fallback)
-let tier          = 'device'        // 'device' | 'wallet'
-let isDemo        = true            // backward-compat flag: true = no wallet bound
-                                    //   wallet DB writes are gated by `!isDemo`
-                                    //   practice DB writes use `deviceId` directly
+let isDemo = false
 
 // Active run state (reset each dungeon run)
 let runState   = null   // player HP, energy, relics, weapon etc
@@ -59,48 +60,11 @@ let lastPlayerMove = null
 let timerInterval = null
 let weeklyInterval = null
 
-// ─── DEVICE IDENTIFIER ──────────────────────────────────────────────────────
-// Try Nimiq Pay's requestDeviceIdentifier (silent after first consent).
-// Falls back to a stable local UUID in dev / non-Nimiq-Pay browsers so the
-// game still works for testing outside the mini-app shell.
-async function bootDeviceId() {
-  // 1. Cache: if we already resolved a device ID this install, reuse it
-  const cached = localStorage.getItem('nimblade.deviceId')
-  if (cached) { deviceId = cached; return cached }
-
-  // 2. Try Nimiq SDK
-  try {
-    const sdk = await import('@nimiq/mini-app-sdk')
-    const fn = sdk.requestDeviceIdentifier
-    if (typeof fn === 'function') {
-      const id = await fn({ reason: 'Save your Nimblade practice progress on this device' })
-      if (id && typeof id === 'string') {
-        deviceId = id
-        localStorage.setItem('nimblade.deviceId', id)
-        return id
-      }
-    }
-  } catch (e) {
-    console.warn('Device Identifier unavailable, using local fallback:', e?.message || e)
-  }
-
-  // 3. Local fallback (dev mode, non-Nimiq-Pay browsers)
-  const fallback =
-    'local_' +
-    (crypto?.randomUUID?.() ||
-      Math.random().toString(36).slice(2) + Date.now().toString(36))
-  deviceId = fallback
-  localStorage.setItem('nimblade.deviceId', fallback)
-  return fallback
-}
-
 // ─── BOOT ────────────────────────────────────────────────────────────────────
 app.innerHTML = renderConnect() + renderUsername() + renderBottomNav()
 showScreen('connect')
 showNav(false)
 bindConnect()
-// Fire-and-forget device ID request — completes silently before player hits PLAY NOW
-bootDeviceId().catch(e => console.warn('bootDeviceId failed', e))
 
 // ─── NAV ─────────────────────────────────────────────────────────────────────
 function bindNav() {
@@ -113,52 +77,32 @@ function bindNav() {
 
 // ─── CONNECT ─────────────────────────────────────────────────────────────────
 function bindConnect() {
-  // PLAY NOW — device tier (no wallet). Anonymous, tracked by Device Identifier.
-  document.getElementById('btnDemo')?.addEventListener('click', async () => {
-    const btn = document.getElementById('btnDemo')
-    btn.disabled = true
-    btn.textContent = 'STARTING...'
-    // Ensure device ID is resolved before entering username screen
-    if (!deviceId) await bootDeviceId().catch(() => {})
-    tier          = 'device'
-    isDemo        = true
-    walletAddress = null
-    showScreen('username')
-    bindUsername()
-  })
-
-  // CONNECT WALLET — official tier. Triggers Nimiq Pay wallet flow + migration.
   document.getElementById('btnConnect')?.addEventListener('click', async () => {
     const btn = document.getElementById('btnConnect')
     btn.textContent = 'CONNECTING...'
     btn.disabled = true
 
     try {
-      const nimiq = await loadNimiq()
-      if (!nimiq) throw new Error('No wallet')
-      walletAddress = nimiq.address
-      tier          = 'wallet'
-      isDemo        = false
+      // Nimiq wallet connect via Nimiq Pay (uses src/nimiq.js wrapper).
+      const addr = await connectWallet()
+      if (!addr) throw new Error('No wallet')
+      walletAddress = addr
+      isDemo = false
       await onWalletConnected()
     } catch (e) {
+      console.error('Connect wallet flow failed:', e)
       btn.textContent = 'CONNECT WALLET'
       btn.disabled = false
       alert('Could not connect wallet. Make sure Nimiq Pay is open.')
     }
   })
-}
 
-async function loadNimiq() {
-  try {
-    const { init } = await import('@nimiq/mini-app-sdk')
-    const nimiq = await init()
-    const accounts = await nimiq.listAccounts()
-    if (!accounts || accounts.length === 0) throw new Error('No accounts')
-    return { address: accounts[0].address, nimiq }
-  } catch (e) {
-    console.error('Nimiq connect failed:', e)
-    return null
-  }
+  document.getElementById('btnDemo')?.addEventListener('click', () => {
+    walletAddress = 'DEMO_' + Math.random().toString(36).slice(2,8).toUpperCase()
+    isDemo = true
+    showScreen('username')
+    bindUsername()
+  })
 }
 
 async function onWalletConnected() {
@@ -169,22 +113,13 @@ async function onWalletConnected() {
     progress.highestDungeon  = player.highest_dungeon || 0
     progress.unlockedWeapons = player.unlocked_weapons || ['sword']
     progress.upgrades        = player.upgrades        || {}
+    progress.sharpenStoneLevel = player.sharpen_stone_level || 0
     progress.weeklyPoints    = player.weekly_points   || 0
     progress.selectedWeapon  = player.weapon          || 'sword'
     saveProgress(progress)
     await checkWeeklyReset(walletAddress)
-    // Retention hook: if this device played as practice before, claim that progress
-    if (deviceId && !player.linked_device_id) {
-      try {
-        const r = await migratePracticeToWallet(deviceId, walletAddress)
-        if (r?.migrated) {
-          console.log(`Practice progress claimed: stage ${r.fromStage}, gold ${r.fromGold}`)
-        }
-      } catch (e) { console.warn('migrate failed', e) }
-    }
     afterLogin()
   } else {
-    // First-time wallet player → username, then migration happens after createPlayer
     showScreen('username')
     bindUsername()
   }
@@ -202,10 +137,6 @@ function bindUsername() {
     if (!isDemo) {
       const { error } = await createPlayer(walletAddress, val, progress.selectedWeapon || 'sword')
       if (error && error.code !== '23505') return alert('Error: ' + error.message)
-      // Newly-created wallet player → try to claim any prior practice progress
-      if (deviceId) {
-        try { await migratePracticeToWallet(deviceId, walletAddress) } catch (e) {}
-      }
     }
 
     saveProgress(progress)
@@ -228,7 +159,7 @@ function rebuildApp() {
     renderHome(progress)           +
     renderDungeonMap(progress)     +
     renderWeaponSelect(progress)   +
-    renderUpgradeTree(progress)    +
+    renderUpgradeTree(progress, walletAddress)    +
     renderLeaderboard([])          +
     renderProfile(progress, walletAddress) +
     renderRules()                  +
@@ -298,7 +229,7 @@ function goWeaponSelect(dungeonId = 1) {
 // ─── UPGRADE TREE ─────────────────────────────────────────────────────────────
 function goUpgradeTree() {
   if (weeklyInterval) { clearInterval(weeklyInterval); weeklyInterval = null }
-  replaceScreen('upgradeTree', renderUpgradeTree(progress))
+  replaceScreen('upgradeTree', renderUpgradeTree(progress, walletAddress))
   showScreen('upgradeTree')
   showNav(true)
   setActiveNav('upgrade')
@@ -317,11 +248,12 @@ function goUpgradeTree() {
       }
 
       // Re-render tree
-      replaceScreen('upgradeTree', renderUpgradeTree(progress))
+      replaceScreen('upgradeTree', renderUpgradeTree(progress, walletAddress))
       showScreen('upgradeTree')
       bindUpgradeBtns()
     })
   })
+  bindSharpenStoneBtns()
 }
 
 function bindUpgradeBtns() {
@@ -333,11 +265,84 @@ function bindUpgradeBtns() {
       progress = result
       saveProgress(progress)
       if (!isDemo) await purchaseUpgradeDB(walletAddress, id, progress.gold, progress.upgrades)
-      replaceScreen('upgradeTree', renderUpgradeTree(progress))
+      replaceScreen('upgradeTree', renderUpgradeTree(progress, walletAddress))
       showScreen('upgradeTree')
       bindUpgradeBtns()
     })
   })
+  bindSharpenStoneBtns()
+}
+
+// ─── SHARPEN STONE (NIM-PAID) ────────────────────────────────────────────────
+function bindSharpenStoneBtns() {
+  document.querySelectorAll('.nim-buy-btn:not([disabled])').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const tier = parseInt(btn.dataset.sharpenTier, 10)
+      await handleSharpenStonePurchase(tier, btn)
+    })
+  })
+}
+
+async function handleSharpenStonePurchase(tier, btn) {
+  // Guard rails
+  if (isDemo || !walletAddress) {
+    alert('Connect your Nimiq wallet first to buy NIM items.')
+    return
+  }
+  const next = getNextSharpenTier(progress.sharpenStoneLevel || 0)
+  if (!next || next.tier !== tier) {
+    alert('You cannot buy this tier yet.')
+    return
+  }
+
+  // Confirm modal (simple native confirm for v1 — can prettify later)
+  const ok = confirm(`Buy ${next.name} for ${next.costNim} NIM?\n\n+1 Max HP permanent.\nNimiq Pay will open to approve.`)
+  if (!ok) return
+
+  // UI: lock button while processing
+  const origLabel = btn.textContent
+  btn.disabled = true
+  btn.textContent = 'PROCESSING…'
+
+  let txHash = null
+  try {
+    // payNim returns tx hash (string) on success, throws on cancel/error
+    txHash = await payNim({
+      amountNim: next.costNim,
+      recipient: NIMBLADE_RECIPIENT,
+      purpose: `sharpen_stone_t${next.tier}`,
+    })
+    console.log('[Sharpen Stone] tx hash:', txHash)
+  } catch (e) {
+    console.error('payNim error:', e)
+    alert('Payment cancelled or failed: ' + (e?.message || 'unknown error'))
+    btn.disabled = false
+    btn.textContent = origLabel
+    return
+  }
+
+  // Persist purchase (audit log + level bump)
+  try {
+    await logNimPurchase({
+      walletAddress,
+      purchaseType: 'sharpen_stone',
+      itemId: `tier_${next.tier}`,
+      amountNim: next.costNim,
+      txHash: typeof txHash === 'string' ? txHash : null,
+    })
+    const newLevel = await incrementSharpenStone(walletAddress, progress.sharpenStoneLevel || 0)
+    progress.sharpenStoneLevel = newLevel ?? (progress.sharpenStoneLevel || 0) + 1
+    saveProgress(progress)
+    alert(`✅ ${next.name} unlocked! +1 Max HP next run.`)
+  } catch (e) {
+    console.error('DB persist error after successful payment:', e)
+    alert('Payment succeeded but saving to server failed. tx: ' + txHash + '\nContact support if level does not update.')
+  }
+
+  // Re-render upgrade tree (button states will refresh from new level)
+  replaceScreen('upgradeTree', renderUpgradeTree(progress, walletAddress))
+  showScreen('upgradeTree')
+  bindUpgradeBtns()
 }
 
 // ─── LEADERBOARD ─────────────────────────────────────────────────────────────
@@ -361,6 +366,7 @@ async function goProfile() {
       progress.highestDungeon  = player.highest_dungeon || progress.highestDungeon
       progress.unlockedWeapons = player.unlocked_weapons || progress.unlockedWeapons
       progress.upgrades        = player.upgrades        || progress.upgrades
+      progress.sharpenStoneLevel = player.sharpen_stone_level ?? progress.sharpenStoneLevel ?? 0
       progress.weeklyPoints    = player.weekly_points   || progress.weeklyPoints
     }
   }
@@ -417,7 +423,7 @@ function startRun(dungeonId) {
   if (!dungeon) return
 
   stageIdx   = 0
-  runState   = createRunState(progress.selectedWeapon || 'sword', progress.upgrades || {})
+  runState   = createRunState(progress.selectedWeapon || 'sword', progress.upgrades || {}, progress.sharpenStoneLevel || 0)
   runState.username = progress.username
 
   startStage()
@@ -993,15 +999,6 @@ async function onDungeonClear() {
 
   if (!isDemo) {
     await recordDungeonClear(walletAddress, dungeon.id, goldEarned)
-  } else if (tier === 'device' && deviceId) {
-    // Practice tier: submit dungeon-clear as a deepest-stage record
-    const stageReached = (dungeon.id - 1) * 5 + 5  // boss cleared = stage 5 of this dungeon
-    await submitPracticeScore(deviceId, {
-      username:  progress.username,
-      weapon:    progress.selectedWeapon || 'sword',
-      bestStage: stageReached,
-      bestGold:  progress.gold || 0,
-    }).catch(e => console.warn('practice submit failed', e))
   }
 
   showResult(true, goldEarned)
@@ -1013,17 +1010,6 @@ async function endRun(won) {
 
   if (!won && !isDemo) {
     await recordRunFailed(walletAddress)
-  } else if (!won && tier === 'device' && deviceId) {
-    // Practice tier: submit partial-run depth so leaderboard tracks attempts
-    const stageReached = (dungeon ? (dungeon.id - 1) * 5 + stageIdx + 1 : 0)
-    if (stageReached > 0) {
-      await submitPracticeScore(deviceId, {
-        username:  progress.username,
-        weapon:    progress.selectedWeapon || 'sword',
-        bestStage: stageReached,
-        bestGold:  progress.gold || 0,
-      }).catch(e => console.warn('practice submit failed', e))
-    }
   }
 
   showResult(won, 0)

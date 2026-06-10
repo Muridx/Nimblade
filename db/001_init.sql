@@ -129,4 +129,11 @@ CREATE POLICY runs_write_all       ON public.active_runs     FOR ALL    USING (t
 CREATE POLICY purchases_read_all   ON public.nim_purchases   FOR SELECT USING (true);
 CREATE POLICY purchases_write_all  ON public.nim_purchases   FOR ALL    USING (true) WITH CHECK (true);
 
--- Done. You should see "Success. No rows returned." in the SQL editor.
+-- ─── 002 — SHARPEN STONE TIERED UPGRADE ─────────────────────────────────────
+-- Adds a single column to track which tier of the Sharpen Stone the player owns.
+-- 0 = none, 5 = max (all tiers bought). Each tier grants +1 permanent Max HP.
+-- Idempotent: safe to re-run.
+
+ALTER TABLE public.players
+  ADD COLUMN IF NOT EXISTS sharpen_stone_level SMALLINT NOT NULL DEFAULT 0
+  CHECK (sharpen_stone_level BETWEEN 0 AND 5);

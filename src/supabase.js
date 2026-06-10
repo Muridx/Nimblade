@@ -54,6 +54,7 @@ export async function createPlayer(walletAddress, username, weapon = 'sword') {
       active_skin: 'default',
       weekly_points: 0,
       weekly_reset_at: new Date().toISOString(),
+      sharpen_stone_level: 0,
     })
     .select()
     .single()
@@ -267,6 +268,25 @@ export async function logNimPurchase({ walletAddress, deviceId, purchaseType, it
       tx_hash: txHash || null,
     })
   return { error }
+}
+
+// ─── SHARPEN STONE OWNERSHIP ───────────────────────────────────
+// Bump sharpen_stone_level by 1, clamped 0-5. Returns the new level on success,
+// or null on failure. The DB CHECK constraint also enforces the 0-5 range.
+export async function incrementSharpenStone(walletAddress, currentLevel) {
+  if (!supabase || !walletAddress) return null
+  const next = Math.min(5, Math.max(0, (currentLevel | 0) + 1))
+  const { data, error } = await supabase
+    .from('players')
+    .update({ sharpen_stone_level: next, updated_at: new Date().toISOString() })
+    .eq('wallet_address', walletAddress)
+    .select('sharpen_stone_level')
+    .single()
+  if (error) {
+    console.error('incrementSharpenStone failed:', error)
+    return null
+  }
+  return data?.sharpen_stone_level ?? next
 }
 
 // ─── MIGRATION (practice → official) ────────────────────────────────────────

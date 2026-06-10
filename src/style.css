@@ -1611,3 +1611,99 @@ body {
   .moves-row { gap: 8px; }
   .move-btn  { padding: 8px 2px 6px; }
 }
+
+/* ─── NIM EXCLUSIVE — SHARPEN STONE TIERS ─────────────────────────────────── */
+.nim-section {
+  border: 1px solid rgba(14, 131, 255, 0.4);
+  background: linear-gradient(180deg, rgba(14, 131, 255, 0.08) 0%, rgba(14, 131, 255, 0.02) 100%);
+  position: relative;
+}
+.nim-section::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #0E83FF, transparent);
+}
+.nim-title {
+  color: #5BB0FF !important;
+  text-shadow: 0 0 8px rgba(14, 131, 255, 0.4);
+  letter-spacing: 0.5px;
+}
+.nim-tier-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  padding: 8px 0;
+}
+.nim-tier-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border: 1px solid rgba(14, 131, 255, 0.25);
+  border-radius: 6px;
+  background: rgba(14, 131, 255, 0.04);
+  text-align: center;
+  transition: all 0.15s ease;
+}
+.nim-tier-card.available {
+  border-color: rgba(14, 131, 255, 0.7);
+  background: rgba(14, 131, 255, 0.12);
+  box-shadow: 0 0 12px rgba(14, 131, 255, 0.2);
+}
+.nim-tier-card.owned {
+  border-color: rgba(95, 220, 130, 0.5);
+  background: rgba(95, 220, 130, 0.08);
+}
+.nim-tier-card.locked { opacity: 0.45; }
+
+.nim-tier-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #E8F1FF;
+  letter-spacing: 0.3px;
+  line-height: 1.1;
+}
+.nim-tier-bonus {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.nim-buy-btn {
+  width: 100%;
+  padding: 6px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border: 1px solid #0E83FF;
+  background: linear-gradient(180deg, #1493FF 0%, #0A6FD9 100%);
+  color: #FFFFFF;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: filter 0.1s ease, transform 0.05s ease;
+  margin-top: 2px;
+  min-height: 30px;
+  font-family: inherit;
+}
+.nim-buy-btn:hover:not([disabled]) { filter: brightness(1.15); }
+.nim-buy-btn:active:not([disabled]) { transform: translateY(1px); }
+.nim-buy-btn.disabled,
+.nim-buy-btn[disabled] {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.45);
+  border-color: rgba(255, 255, 255, 0.12);
+  cursor: not-allowed;
+}
+.nim-tier-card.owned .nim-buy-btn {
+  background: rgba(95, 220, 130, 0.18);
+  border-color: rgba(95, 220, 130, 0.5);
+  color: #BFF5CF;
+}
+
+/* Mobile: shrink type, keep 5 columns. On very narrow, allow wrap. */
+@media (max-width: 380px) {
+  .nim-tier-name { font-size: 10px; }
+  .nim-tier-bonus { font-size: 9px; }
+  .nim-buy-btn { font-size: 9px; padding: 5px 2px; }
+}
