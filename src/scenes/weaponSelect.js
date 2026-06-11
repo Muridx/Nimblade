@@ -1,7 +1,3 @@
-/**
-  * NIMBLADE -- weapon select scene
-  * 4 weapon cards + stats panel + BEGIN RUN
- */
 import { mountScene } from "./sceneManager.js";
 import { getState, setState } from "../state/store.js";
 import weaponsData from "../data/weapons.json";
@@ -28,14 +24,13 @@ export function weaponSelectScene(root) {
           <span class="ws__name">${weapon.name}</span>
           <span class="ws__identity">${weapon.identity}</span>
           ${lockBadge}
-        </button>
-      `;
+        </button>`;
     }).join("");
 
     root.innerHTML = `
       <div class="weapon-select">
         <button class="ws__back" data-action="back">&larr; Back</button>
-        ## CHOOSE YOUR WEAPON
+        <div class="ws__title">CHOOSE YOUR WEAPON</div>
         <p class="ws__mode">${isDemo ? "DEMO MODE - all weapons unlocked" : "FULL RUN"}</p>
         <div class="ws__grid">${cards}</div>
         <div class="ws__panel">
@@ -49,8 +44,7 @@ export function weaponSelectScene(root) {
           <div class="ws__ult"><strong>ULT - ${w.ultimate.name} (${w.ultimate.cost}):</strong> ${w.ultimate.description}</div>
         </div>
         <button class="btn btn--primary ws__begin" data-action="begin">BEGIN RUN</button>
-      </div>
-    `;
+      </div>`;
   };
 
   const onClick = (e) => {
@@ -67,7 +61,7 @@ export function weaponSelectScene(root) {
     } else if (action === "begin") {
       setState({ run: { ...getState().run, weapon: selected } });
       console.log(`[run] start mode=${run.mode} weapon=${selected}`);
-      alert(`Run starting!\nMode: ${run.mode}\nWeapon: ${selected}\n(Map scene = Step 2.6)`);
+      mountScene("battle", root);
     }
   };
 
