@@ -5,9 +5,9 @@ import weaponsData from "../data/weapons.json";
 
 const BASE_PLAYER_HP = 100;
 const MAX_ENERGY = 100;
-const INTENT_ICON = { SLASH: "⚔", GUARD: "🛡", COUNTER: "↩" };
+const INTENT_ICON = { SLASH: "S", GUARD: "G", COUNTER: "C" };
 const BEATS = { SLASH: "COUNTER", GUARD: "SLASH", COUNTER: "GUARD" };
-const RPS = ["SLASH","GUARD","COUNTER"];
+const RPS = ["SLASH", "GUARD", "COUNTER"];
 
 export function battleScene(root, opts) {
   opts = opts || {};
@@ -18,77 +18,199 @@ export function battleScene(root, opts) {
   const spriteId = enemyDef.sprite_id || enemyDef.id;
 
   const state = {
-    turn: 1, floor: opts.floor || 1, floorMax: 5, chapter: opts.chapter || "CH1",
-    player: { hp: BASE_PLAYER_HP, maxHp: BASE_PLAYER_HP, energy: 0, maxEnergy: MAX_ENERGY, comboCount: 0, momentumStacks: 0 },
+    turn: 1,
+    floor: opts.floor || 1,
+    floorMax: 5,
+    chapter: opts.chapter || "CH1",
+    player: {
+      hp: BASE_PLAYER_HP,
+      maxHp: BASE_PLAYER_HP,
+      energy: 0,
+      maxEnergy: MAX_ENERGY,
+      comboCount: 0,
+      momentumStacks: 0,
+      berserkTurns: 0,
+    },
     enemy: { hp: enemyDef.hp, maxHp: enemyDef.hp, buffs: [] },
     log: [`-- Battle start --`, `${enemyDef.name} appears (HP ${enemyDef.hp})`],
-    pendingAction: null, ended: null, intent: null,
+    pendingAction: null,
+    ended: null,
+    intent: null,        // DISPLAYED intent (may lie per honest_pct)
+    actualIntent: null,  // TRUE move (used in resolve)
+    foresightQueue: [],  // queued ACTUAL intents for next turns
+    foresightActiveThisTurn: false, // true if current intent sourced from foresight queue
   };
 
-  const rollIntent = () => {
-    if (Array.isArray(enemyDef.pattern)) return enemyDef.pattern[(state.turn - 1) % enemyDef.pattern.length];
-    return RPS[Math.floor(Math.random()*3)];
-  };
-  state.intent = rollIntent();
+  const honestPct = (typeof enemyDef.honest_pct === "number") ? enemyDef.honest_pct : 100;
 
-  const intentDmgDisplay = (intent) => intent === "GUARD" ? 0 : (intent === "COUNTER" ? (enemyDef.dmg + 3) : enemyDef.dmg);
+  const rollActualIntent = () => {
+    if (Array.isArray(enemyDef.pattern)) {
+      return enemyDef.pattern[(state.turn - 1) % enemyDef.pattern.length];
+    }
+    return RPS[Math.floor(Math.random() * 3)];
+  };
+
+  const rollDisplayedFor = (actual) => {
+    // honest_pct% chance display = actual. Else display = one of the OTHER 2 (gocek).
+    if (Math.random() * 100 < honestPct) return actual;
+    const others = RPS.filter((x) => x !== actual);
+    return others[Math.floor(Math.random() * others.length)];
+  };
+
+  // Initial roll
+  state.actualIntent = rollActualIntent();
+  state.intent = rollDisplayedFor(state.actualIntent);
+
+  const peekActualIntent = (offset) => {
+    // For pattern monsters: deterministic. For random: roll fresh (locked into queue).
+    if (Array.isArray(enemyDef.pattern)) {
+      return enemyDef.pattern[(state.turn - 1 + offset) % enemyDef.pattern.length];
+    }
+    return RPS[Math.floor(Math.random() * 3)];
+  };
+
+  const intentDmgDisplay = (intent) => {
+    if (intent === "GUARD") return 0;
+    if (intent === "COUNTER") return enemyDef.dmg + 3;
+    return enemyDef.dmg;
+  };
 
   const lossDmgTaken = (action, baseDmg) => {
-    if (action === "GUARD") return Math.floor(baseDmg * (1 - S.guard_dmg_reduction_pct/100));
+    if (action === "GUARD") return Math.floor(baseDmg * (1 - S.guard_dmg_reduction_pct / 100));
     if (action === "COUNTER") return baseDmg + S.counter_loss_dmg_taken;
     return baseDmg;
   };
 
+  // Apply berserk taken multiplier (+50% taken while active)
+  const applyBerserkTaken = (taken) => {
+    if (state.player.berserkTurns > 0) return Math.floor(taken * 1.5);
+    return taken;
+  };
+
+  // Apply berserk dealt multiplier (+100% = x2 while active)
+  const applyBerserkDealt = (dmg) => {
+    if (state.player.berserkTurns > 0) return Math.floor(dmg * 2);
+    return dmg;
+  };
+
+  const tickPlayerBuffs = () => {
+    if (state.player.berserkTurns > 0) {
+      state.player.berserkTurns--;
+      if (state.player.berserkTurns === 0) {
+        state.log.push("Berserk ended.");
+      }
+    }
+  };
+
   const resolve = (action) => {
-    const intent = state.intent;
-    let line = `T${state.turn}: You ${action} vs ${intent} → `;
+    const intent = state.actualIntent; // use TRUE move for RPS resolution (display may have lied)
+    const wasFeint = state.intent !== state.actualIntent;
+    let line = `T${state.turn}: You ${action} vs ${intent}${wasFeint ? " [FEINT!]" : ""} -> `;
 
     if (action === "WILD") {
       state.player.energy -= S.ws_cost;
-      state.enemy.hp -= S.ws_dmg;
-      const taken = enemyDef.dmg; // full hit, ignores RPS
+      let dmg = S.ws_dmg;
+      dmg = applyBerserkDealt(dmg);
+      state.enemy.hp -= dmg;
+      const taken = applyBerserkTaken(enemyDef.dmg);
       state.player.hp -= taken;
-      line += `WILD ${S.ws_dmg} dmg, took ${taken}`;
+      line += `WILD ${dmg} dmg, took ${taken}`;
       state.player.comboCount = 0;
       state.player.momentumStacks = 0;
     } else if (action === "ULT") {
       state.player.energy -= S.ult_cost;
       if (weapon.id === "sword") {
-        state.enemy.hp -= 25;
-        const taken = enemyDef.dmg;
+        let dmg = 25;
+        dmg = applyBerserkDealt(dmg);
+        state.enemy.hp -= dmg;
+        const taken = applyBerserkTaken(enemyDef.dmg);
         state.player.hp -= taken;
-        line += `BLADE RUSH 25 dmg, took ${taken}`;
+        line += `BLADE RUSH ${dmg} dmg, took ${taken}`;
+      } else if (weapon.id === "spear") {
+        // Foresight: skip turn (0 dmg from you), enemy hits free, reveal next 2 ACTUAL
+        const taken = applyBerserkTaken(enemyDef.dmg);
+        state.player.hp -= taken;
+        state.foresightQueue = [peekActualIntent(1), peekActualIntent(2)];
+        line += `FORESIGHT - skip, took ${taken}, next 2 actuals locked & revealed`;
+      } else if (weapon.id === "axe") {
+        // Berserk: ULT activation turn = NORMAL hit (buff not yet active). Then 2 turns of +100% dealt / +50% taken.
+        const taken = enemyDef.dmg; // raw, berserk not active yet on activation turn
+        state.player.hp -= taken;
+        state.player.berserkTurns = 3; // 3 because end-of-turn tick reduces to 2 = 2 active buff turns
+        line += `BERSERK ON (next 2 turns), took ${taken}`;
+      } else if (weapon.id === "staff") {
+        // Purify: heal 15, restore 40 energy. Enemy still hits.
+        const healAmt = Math.min(15, state.player.maxHp - state.player.hp);
+        state.player.hp += healAmt;
+        state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 40);
+        const taken = applyBerserkTaken(enemyDef.dmg);
+        state.player.hp -= taken;
+        line += `PURIFY +${healAmt} HP +40e, took ${taken}`;
       } else {
-        state.enemy.hp -= 20;
-        line += `ULT 20 dmg (stub, weapon-specific = 2.5c)`;
+        let dmg = applyBerserkDealt(20);
+        state.enemy.hp -= dmg;
+        line += `ULT ${dmg} dmg (stub)`;
       }
       state.player.comboCount = 0;
       state.player.momentumStacks = 0;
     } else {
-      // RPS resolve
+      // Normal RPS
       if (action === intent) {
         line += "DRAW (0/0)";
         state.player.comboCount = 0;
         state.player.momentumStacks = 0;
         state.player.energy += Math.floor(S.energy_regen_per_turn / 2);
       } else if (BEATS[action] === intent) {
-        // player wins
+        // WIN
         state.player.comboCount++;
         let dmg = action === "SLASH" ? S.slash_dmg : action === "COUNTER" ? S.counter_win_dmg : S.guard_win_dmg;
-        // Sword Momentum: +1 stack per SLASH/COUNTER win (cap 5), each stack = +1 dmg this and future wins
+
+        // Sword Momentum
         if (weapon.id === "sword" && (action === "SLASH" || action === "COUNTER")) {
           state.player.momentumStacks = Math.min(5, state.player.momentumStacks + 1);
         }
-        dmg += (weapon.id === "sword" ? state.player.momentumStacks : 0);
-        // Combo 3-streak: +50%
-        if (state.player.comboCount >= 3) dmg = Math.floor(dmg * 1.5);
+        if (weapon.id === "sword") {
+          dmg += state.player.momentumStacks;
+        }
+
+        // Spear Precise Read: +2 dmg on COUNTER wins
+        if (weapon.id === "spear" && action === "COUNTER") {
+          dmg += 2;
+        }
+
+        // Axe Crit Strike: 10% chance x2 on SLASH/COUNTER wins
+        let crit = false;
+        if (weapon.id === "axe" && (action === "SLASH" || action === "COUNTER")) {
+          if (Math.random() < 0.1) {
+            dmg *= 2;
+            crit = true;
+          }
+        }
+
+        // Combo 3+ bonus
+        if (state.player.comboCount >= 3) {
+          dmg = Math.floor(dmg * 1.5);
+        }
+
+        // Berserk dealt multiplier
+        dmg = applyBerserkDealt(dmg);
+
         state.enemy.hp -= dmg;
-        line += `WIN deal ${dmg}`;
+        line += `WIN deal ${dmg}${crit ? " * CRIT!" : ""}`;
         state.player.energy += S.energy_regen_per_turn;
+
+        // Staff Arcane Recovery: +1 HP per RPS win, cap maxHp
+        if (weapon.id === "staff") {
+          if (state.player.hp < state.player.maxHp) {
+            state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1);
+            line += " (+1 HP)";
+          }
+        }
       } else {
-        // player loses
+        // LOSS
         const base = enemyDef.dmg;
-        const taken = lossDmgTaken(action, base);
+        let taken = lossDmgTaken(action, base);
+        taken = applyBerserkTaken(taken);
         state.player.hp -= taken;
         line += `LOSS took ${taken}`;
         state.player.comboCount = 0;
@@ -103,18 +225,35 @@ export function battleScene(root, opts) {
     state.log.push(line);
     console.log(`[battle] ${line}`);
 
-    if (state.enemy.hp <= 0) { state.ended = "win"; state.log.push("✦ VICTORY ✦"); }
-    else if (state.player.hp <= 0) { state.ended = "lose"; state.log.push("✗ DEFEAT ✗"); }
-    else { state.turn++; state.intent = rollIntent(); }
+    if (state.enemy.hp <= 0) {
+      state.ended = "win";
+      state.log.push("* VICTORY *");
+    } else if (state.player.hp <= 0) {
+      state.ended = "lose";
+      state.log.push("x DEFEAT x");
+    } else {
+      state.turn++;
+      // Tick player buffs (berserk countdown)
+      tickPlayerBuffs();
+      // Roll next intent: actual first (prefer foresight queue = honest display), else normal gocek roll
+      if (state.foresightQueue.length > 0) {
+        state.actualIntent = state.foresightQueue.shift();
+        state.intent = state.actualIntent; // foresight rounds: display = actual (100% honest)
+        state.foresightActiveThisTurn = true;
+      } else {
+        state.actualIntent = rollActualIntent();
+        state.intent = rollDisplayedFor(state.actualIntent);
+        state.foresightActiveThisTurn = false;
+      }
+    }
   };
 
-  // Cheat keys for testing
   window.cheat = {
     energy: (n) => { state.player.energy = n; render(); console.log(`[cheat] energy=${n}`); },
     enemyHp: (n) => { state.enemy.hp = n; render(); console.log(`[cheat] enemyHp=${n}`); },
     playerHp: (n) => { state.player.hp = n; render(); console.log(`[cheat] playerHp=${n}`); },
-    win: () => { state.enemy.hp = 0; state.ended = "win"; state.log.push("✦ CHEAT VICTORY ✦"); render(); },
-    lose: () => { state.player.hp = 0; state.ended = "lose"; state.log.push("✗ CHEAT DEFEAT ✗"); render(); },
+    win: () => { state.enemy.hp = 0; state.ended = "win"; state.log.push("* CHEAT VICTORY *"); render(); },
+    lose: () => { state.player.hp = 0; state.ended = "lose"; state.log.push("x CHEAT DEFEAT x"); render(); },
     help: () => console.log("cheat.energy(n) | cheat.enemyHp(n) | cheat.playerHp(n) | cheat.win() | cheat.lose()"),
   };
   console.log("[cheat] available: cheat.help()");
@@ -126,13 +265,36 @@ export function battleScene(root, opts) {
     const ultCost = S.ult_cost;
     const canUlt = !state.ended && state.player.energy >= ultCost;
     const canWild = !state.ended && state.player.energy >= S.ws_cost;
+
+    // Player buff chips
+    const playerBuffs = [];
+    if (state.player.berserkTurns > 0) {
+      playerBuffs.push(`<span class="b-chip b-chip--berserk">BERSERK ${state.player.berserkTurns}t</span>`);
+    }
+    if (state.player.momentumStacks > 0 && weapon.id === "sword") {
+      playerBuffs.push(`<span class="b-chip">MOMENTUM +${state.player.momentumStacks}</span>`);
+    }
+    const playerBuffsHtml = playerBuffs.length ? playerBuffs.join("") : `<span class="b-chip b-chip--none">none</span>`;
+
     const enemyBuffsHtml = state.enemy.buffs.length
-      ? state.enemy.buffs.map(b => `<span class="b-chip">${b}</span>`).join("")
+      ? state.enemy.buffs.map((b) => `<span class="b-chip">${b}</span>`).join("")
       : `<span class="b-chip b-chip--none">none</span>`;
-    const pHpPct = (state.player.hp/state.player.maxHp)*100;
-    const pEngPct = (state.player.energy/state.player.maxEnergy)*100;
-    const eHpPct = (state.enemy.hp/state.enemy.maxHp)*100;
-    const ultPct = Math.min(100, (state.player.energy/ultCost)*100);
+
+    // Foresight reveal
+    let foresightHtml = "";
+    if (state.foresightActiveThisTurn) {
+      const nextChips = state.foresightQueue.length
+        ? ` NEXT: ${state.foresightQueue.map(i => `<span class="b-fs-chip">${INTENT_ICON[i]} ${i}</span>`).join(" ")}`
+        : "";
+      foresightHtml = `<div class="b-foresight">FORESIGHT - this intent is HONEST.${nextChips}</div>`;
+    } else if (state.foresightQueue.length) {
+      foresightHtml = `<div class="b-foresight">NEXT: ${state.foresightQueue.map(i => `<span class="b-fs-chip">${INTENT_ICON[i]} ${i}</span>`).join(" ")}</div>`;
+    }
+
+    const pHpPct = (state.player.hp / state.player.maxHp) * 100;
+    const pEngPct = (state.player.energy / state.player.maxEnergy) * 100;
+    const eHpPct = (state.enemy.hp / state.enemy.maxHp) * 100;
+    const ultPct = Math.min(100, (state.player.energy / ultCost) * 100);
 
     const action = (act, label, dmg, beats) => {
       const pending = state.pendingAction === act ? "b-act--pending" : "";
@@ -142,63 +304,73 @@ export function battleScene(root, opts) {
         <div class="b-act__sub">Beats ${beats}</div>
       </button>`;
     };
-    const logHtml = state.log.slice(-5).map(l => `<div>${l}</div>`).join("");
+    const logHtml = state.log.slice(-5).map((l) => `<div>${l}</div>`).join("");
+
+    // Confirm bar with berserk warning
+    let confirmExtra = "";
+    if (state.pendingAction && state.player.berserkTurns > 0) {
+      confirmExtra = ` <em class="b-confirm__warn">(BERSERK +100% dmg / +50% taken)</em>`;
+    }
     const confirmBar = state.pendingAction ? `
       <div class="b-confirm">
-        <span>Confirm <strong>${state.pendingAction}</strong>?</span>
+        <span>Confirm <strong>${state.pendingAction}</strong>?${confirmExtra}</span>
         <button class="btn btn--primary b-confirm__yes" data-action="confirm">CONFIRM</button>
         <button class="btn btn--secondary b-confirm__no" data-action="cancel">CANCEL</button>
       </div>` : "";
+
     const endOverlay = state.ended ? `
       <div class="b-end b-end--${state.ended}">
-        <div class="b-end__title">${state.ended === "win" ? "✦ VICTORY ✦" : "✗ DEFEAT ✗"}</div>
+        <div class="b-end__title">${state.ended === "win" ? "* VICTORY *" : "x DEFEAT x"}</div>
         <div class="b-end__sub">${state.ended === "win" ? `${enemyDef.name} defeated in ${state.turn} turns` : `You fell to ${enemyDef.name}`}</div>
-        <div class="b-end__stats">HP ${state.player.hp}/${state.player.maxHp} · Combo max ${state.player.comboCount}</div>
+        <div class="b-end__stats">HP ${state.player.hp}/${state.player.maxHp} - Combo max ${state.player.comboCount}</div>
         <button class="btn btn--primary b-end__btn" data-action="end-back">BACK TO LOBBY</button>
       </div>` : "";
+
     const actionsBlock = state.ended ? "" : (state.pendingAction ? confirmBar : `
       <div class="b-acts-row">
-        ${action("SLASH", "⚔ SLASH", S.slash_dmg, "COUNTER")}
-        ${action("GUARD", "🛡 GUARD", S.guard_dmg_reduction_pct + "%", "SLASH")}
-        ${action("COUNTER", "↩ COUNTER", S.counter_win_dmg, "GUARD")}
+        ${action("SLASH", "SLASH", S.slash_dmg, "COUNTER")}
+        ${action("GUARD", "GUARD", S.guard_dmg_reduction_pct + "%", "SLASH")}
+        ${action("COUNTER", "COUNTER", S.counter_win_dmg, "GUARD")}
       </div>
       <button class="b-wild ${canWild ? "" : "b-wild--off"}" data-action="action" data-act="WILD" ${canWild ? "" : "disabled"}>
-        💥 WILD STRIKE - <strong>${S.ws_dmg} dmg</strong>, ignores RPS · ⚡${S.ws_cost}
+        WILD STRIKE - <strong>${S.ws_dmg} dmg</strong>, ignores RPS - ${S.ws_cost}e
       </button>`);
 
     root.innerHTML = `
       <div class="b-screen">
         <div class="b-header">
-          <button class="b-icon-btn" data-action="settings">⚙</button>
-          <div class="b-stage">${state.chapter} · FLOOR ${state.floor}/${state.floorMax}</div>
+          <button class="b-icon-btn" data-action="settings">SET</button>
+          <div class="b-stage">${state.chapter} - FLOOR ${state.floor}/${state.floorMax}</div>
           <button class="b-icon-btn b-runinfo" data-action="runinfo">RUN INFO</button>
         </div>
         <div class="b-zone">
           <div class="b-side b-side--player">
             <div class="b-side__label">YOU</div>
             <div class="b-bar"><div class="b-bar__fill b-bar__fill--hp" style="width:${pHpPct}%"></div><span class="b-bar__text">HP ${state.player.hp}/${state.player.maxHp}</span></div>
-            <div class="b-bar"><div class="b-bar__fill b-bar__fill--eng" style="width:${pEngPct}%"></div><span class="b-bar__text">⚡ ${state.player.energy}/${state.player.maxEnergy}</span></div>
+            <div class="b-bar"><div class="b-bar__fill b-bar__fill--eng" style="width:${pEngPct}%"></div><span class="b-bar__text">ENG ${state.player.energy}/${state.player.maxEnergy}</span></div>
+            <div class="b-buffs">BUFFS: ${playerBuffsHtml}</div>
             <div class="b-sprite" style="background-image:url('/assets/${weapon.id}_idle.png')"></div>
           </div>
           <div class="b-side b-side--enemy">
             <div class="b-side__label">${enemyDef.name.toUpperCase()}</div>
             <div class="b-bar"><div class="b-bar__fill b-bar__fill--enemyhp" style="width:${eHpPct}%"></div><span class="b-bar__text">HP ${state.enemy.hp}/${state.enemy.maxHp}</span></div>
             <div class="b-intent">INTENT: ${intentIcon} ${intent}${idmg ? ` <strong>${idmg}</strong>` : ""}</div>
+            ${foresightHtml}
             <div class="b-buffs">BUFFS: ${enemyBuffsHtml}</div>
             <div class="b-sprite" style="background-image:url('/assets/${spriteId}.png')"></div>
           </div>
         </div>
         <div class="b-mid">
           <div class="b-card">
-            <div class="b-card__title">${weapon.icon} ${weapon.name.toUpperCase()}</div>
+            <div class="b-card__title">${weapon.name.toUpperCase()}</div>
             <div class="b-card__small"><strong>${weapon.passive.name}</strong></div>
             <div class="b-card__small">Stacks: ${state.player.momentumStacks}</div>
             <div class="b-card__small">Combo: x${state.player.comboCount}</div>
           </div>
           <button class="b-card b-card--ult ${canUlt ? "b-card--ready" : ""}" data-action="ult" ${!canUlt ? "disabled" : ""}>
-            <div class="b-card__title">✦ ${weapon.ultimate.name.toUpperCase()}</div>
+            <div class="b-card__title">${weapon.ultimate.name.toUpperCase()}</div>
             <div class="b-bar b-bar--ult"><div class="b-bar__fill b-bar__fill--ult" style="width:${ultPct}%"></div><span class="b-bar__text">${state.player.energy}/${ultCost}</span></div>
-            <div class="b-card__small">${canUlt ? "TAP TO USE" : weapon.ultimate.description.slice(0,38)}</div>
+            <div class="b-card__small">${canUlt ? "TAP TO USE" : weapon.ultimate.description.slice(0, 38)}</div>
           </button>
           <div class="b-card">
             <div class="b-card__title">ROUND ${state.turn}</div>
@@ -224,14 +396,26 @@ export function battleScene(root, opts) {
     const t = e.target.closest("[data-action]");
     if (!t) return;
     const action = t.dataset.action;
-    if (action === "flee") { if (confirm("Surrender this battle?")) mountScene("lobby", root); }
-    else if (action === "end-back") { mountScene("lobby", root); }
-    else if (action === "settings") { alert("Settings coming Step 2.10"); }
-    else if (action === "runinfo") { alert(`RUN INFO\n\nMode: ${run.mode}\nWeapon: ${weapon.name}\nFloor: ${state.floor}/${state.floorMax}\nGold + Relics: Step 2.7`); }
-    else if (action === "ult") { if (state.ended) return; state.pendingAction = "ULT"; render(); }
-    else if (action === "action") { if (state.ended) return; state.pendingAction = t.dataset.act; render(); }
-    else if (action === "cancel") { state.pendingAction = null; render(); }
-    else if (action === "confirm") {
+    if (action === "flee") {
+      if (confirm("Surrender this battle?")) mountScene("lobby", root);
+    } else if (action === "end-back") {
+      mountScene("lobby", root);
+    } else if (action === "settings") {
+      alert("Settings coming Step 2.10");
+    } else if (action === "runinfo") {
+      alert(`RUN INFO\n\nMode: ${run.mode}\nWeapon: ${weapon.name}\nFloor: ${state.floor}/${state.floorMax}\nGold + Relics: Step 2.7`);
+    } else if (action === "ult") {
+      if (state.ended) return;
+      state.pendingAction = "ULT";
+      render();
+    } else if (action === "action") {
+      if (state.ended) return;
+      state.pendingAction = t.dataset.act;
+      render();
+    } else if (action === "cancel") {
+      state.pendingAction = null;
+      render();
+    } else if (action === "confirm") {
       const act = state.pendingAction;
       state.pendingAction = null;
       resolve(act);
@@ -240,5 +424,8 @@ export function battleScene(root, opts) {
   };
   root.addEventListener("click", onClick);
   render();
-  return () => { root.removeEventListener("click", onClick); delete window.cheat; };
+  return () => {
+    root.removeEventListener("click", onClick);
+    delete window.cheat;
+  };
 }
