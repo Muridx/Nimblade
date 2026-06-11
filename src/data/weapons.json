@@ -1,0 +1,86 @@
+{
+  "sword": {
+    "id": "sword",
+    "name": "Sword",
+    "identity": "Balanced (starter)",
+    "icon": "🗡",
+    "sprite_prefix": "sword",
+    "stats": {
+      "slash_dmg": 10,
+      "guard_dmg_reduction_pct": 50,
+      "guard_win_dmg": 6,
+      "counter_win_dmg": 14,
+      "counter_loss_dmg_taken": 3,
+      "ws_dmg": 8,
+      "ws_cost": 40,
+      "ult_cost": 100,
+      "energy_regen_per_turn": 20
+    },
+    "passive": { "id": "momentum", "name": "Momentum", "description": "+1 permanent dmg buff per basic RPS win (SLASH/COUNTER only). Cap at +5. Resets on any draw or loss. Persists across battles within a run." },
+    "ultimate": { "id": "blade_rush", "name": "Blade Rush", "cost": 100, "description": "Deal 25 dmg, ignore RPS outcome, ignore monster GUARD intent reduction." },
+    "unlock": "starter"
+  },
+  "spear": {
+    "id": "spear",
+    "name": "Spear",
+    "identity": "Counter-focused",
+    "icon": "⚡",
+    "sprite_prefix": "spear",
+    "stats": {
+      "slash_dmg": 9,
+      "guard_dmg_reduction_pct": 50,
+      "guard_win_dmg": 6,
+      "counter_win_dmg": 16,
+      "counter_loss_dmg_taken": 2,
+      "ws_dmg": 8,
+      "ws_cost": 40,
+      "ult_cost": 100,
+      "energy_regen_per_turn": 20
+    },
+    "passive": { "id": "precise_read", "name": "Precise Read", "description": "COUNTER wins deal +2 dmg (16 -> 18)." },
+    "ultimate": { "id": "foresight", "name": "Foresight", "cost": 100, "description": "Skip current turn (deal 0 dmg, monster acts free), reveal next 2 turns of monster intent at 100% honesty." },
+    "unlock": { "achievement_id": "spear_max_counter_wins_battle", "threshold": 4, "description": "Win 1 battle with 4+ total COUNTER wins." }
+  },
+  "axe": {
+    "id": "axe",
+    "name": "Axe",
+    "identity": "Brute force",
+    "icon": "🪓",
+    "sprite_prefix": "axe",
+    "stats": {
+      "slash_dmg": 13,
+      "guard_dmg_reduction_pct": 65,
+      "guard_win_dmg": 6,
+      "counter_win_dmg": 14,
+      "counter_loss_dmg_taken": 3,
+      "ws_dmg": 8,
+      "ws_cost": 40,
+      "ult_cost": 100,
+      "energy_regen_per_turn": 20
+    },
+    "passive": { "id": "crit_strike", "name": "Crit Strike", "description": "10% chance on SLASH/COUNTER wins to deal x2 damage." },
+    "ultimate": { "id": "berserk", "name": "Berserk", "cost": 100, "description": "For 2 turns: deal +100% dmg AND take +50% dmg from monster." },
+    "unlock": { "achievement_id": "axe_max_turn_dmg", "threshold": 30, "description": "Deal 30+ dmg in a single turn (any run)." }
+  },
+  "staff": {
+    "id": "staff",
+    "name": "Staff",
+    "identity": "Mage / abilities",
+    "icon": "📜",
+    "sprite_prefix": "staff",
+    "stats": {
+      "slash_dmg": 8,
+      "guard_dmg_reduction_pct": 50,
+      "guard_win_dmg": 6,
+      "counter_win_dmg": 12,
+      "counter_loss_dmg_taken": 3,
+      "ws_dmg": 10,
+      "ws_cost": 35,
+      "ult_cost": 85,
+      "energy_regen_per_turn": 20
+    },
+    "passive": { "id": "arcane_recovery", "name": "Arcane Recovery", "description": "+1 HP per basic RPS win (SLASH/GUARD/COUNTER wins only). No cap." },
+    "ultimate": { "id": "purify", "name": "Purify", "cost": 85, "description": "Heal 15 HP and restore 40 energy. Enables cycle-ult mage rotation." },
+    "unlock": { "achievement_id": "staff_max_ult_per_run", "threshold": 3, "description": "Use Ultimate 3 times in a single battle." }
+  }
+}
