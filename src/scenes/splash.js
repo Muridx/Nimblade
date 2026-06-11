@@ -1,7 +1,5 @@
-/**
-  * NIMBLADE -- splash scene
-  * Full bg + logo + tap to start.
- */
+import { mountScene } from "./sceneManager.js";
+
 export function splashScene(root) {
   root.innerHTML = `
     <div class="splash">
@@ -11,13 +9,10 @@ export function splashScene(root) {
   `;
 
   const onTap = () => {
-    console.log("[splash] tap to start");
-    // Step 2.4 -- mount lobby scene di sini
+    console.log("[splash] -> lobby");
+    mountScene("lobby", root);
   };
 
   root.addEventListener("click", onTap);
-
-  return () => {
-    root.removeEventListener("click", onTap);
-  };
+  return () => root.removeEventListener("click", onTap);
 }

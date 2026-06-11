@@ -1,11 +1,9 @@
-/**
-  * NIMBLADE — scene manager
-  * Each scene is a function (root) => unmountFn.
- */
 import { splashScene } from "./splash.js";
+import { lobbyScene } from "./lobby.js";
 
 const scenes = {
   splash: splashScene,
+  lobby: lobbyScene,
 };
 
 let currentUnmount = null;

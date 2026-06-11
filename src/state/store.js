@@ -1,13 +1,14 @@
 /**
-  * NIMBLADE — global store (pub/sub)
-  * Single source of truth for scene, run state, meta.
+  * NIMBLADE -- global store (pub/sub)
  */
 const listeners = new Set();
 
 const state = {
   scene: "splash",
-  run: null,
-  meta: null,
+  run: null,  // { mode: "full" | "demo", weapon: "sword", ... }
+  meta: {
+    wallet: null,  // { address: string } | null
+  },
 };
 
 export function getState() {
