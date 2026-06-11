@@ -1,7 +1,4 @@
-/**
-  * NIMBLADE -- lobby scene
-  * bg + 2 buttons (START RUN / TRY DEMO) + wallet chip
- */
+import { mountScene } from "./sceneManager.js";
 import { getState, setState } from "../state/store.js";
 
 export function lobbyScene(root) {
@@ -29,22 +26,18 @@ export function lobbyScene(root) {
       alert("Wallet connect coming in Step 2.9 (Nimiq Pay SDK).");
       return;
     }
-
     if (action === "start-run") {
       if (!getState().meta.wallet) {
         alert("Connect your wallet to start a full run, or try DEMO mode.");
         return;
       }
       setState({ run: { mode: "full" } });
-      console.log("[lobby] start full run");
-      // Step 2.6 -- mount map scene
+      mountScene("weaponSelect", root);
       return;
     }
-
     if (action === "try-demo") {
       setState({ run: { mode: "demo" } });
-      console.log("[lobby] start demo run");
-      // Step 2.6 -- mount map scene (demo)
+      mountScene("weaponSelect", root);
       return;
     }
   };

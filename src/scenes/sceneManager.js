@@ -1,9 +1,11 @@
 import { splashScene } from "./splash.js";
 import { lobbyScene } from "./lobby.js";
+import { weaponSelectScene } from "./weaponSelect.js";
 
 const scenes = {
   splash: splashScene,
   lobby: lobbyScene,
+  weaponSelect: weaponSelectScene,
 };
 
 let currentUnmount = null;
