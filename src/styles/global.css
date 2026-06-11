@@ -17,25 +17,42 @@ body {
   overflow: hidden;
 }
 
-.bootstrap {
+/* ===== SPLASH SCENE ===== */
+.splash {
+  width: 100%;
+  height: 100%;
+  background-image: url("/assets/splash_main.png");
+  background-size: cover;
+  background-position: center;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  gap: 12px;
+  justify-content: space-between;
+  padding: 6vh 0 10vh;
+  cursor: pointer;
+  user-select: none;
 }
 
-.bootstrap__title {
-  font-size: 56px;
+.splash__logo {
+  width: min(70vw, 480px);
+  height: min(28vw, 180px);
+  background-image: url("/assets/logo_nimblade.png");
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.7));
+}
+
+.splash__cta {
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: 0.3em;
+  color: var(--fg);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+  animation: pulse 1.6s ease-in-out infinite;
 }
 
-.bootstrap__subtitle {
-  color: var(--muted);
-  font-size: 14px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
 }

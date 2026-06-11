@@ -1,15 +1,11 @@
 /**
   * NIMBLADE — entry point
-  * v1.1 fresh scaffold (2026-06-11)
+  * v1.1 — Step 2.3: scene framework + splash
  */
 import "./styles/global.css";
+import { mountScene } from "./scenes/sceneManager.js";
 
 const app = document.getElementById("app");
-app.innerHTML = `
-  <main class="bootstrap">
-    # NIMBLADE
-    <p class="bootstrap__subtitle">v1.1 scaffold · ready to build</p>
-  </main>
-`;
+mountScene("splash", app);
 
-console.log("[NIMBLADE] scaffold loaded");
+console.log("[NIMBLADE] booted");
