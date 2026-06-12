@@ -13,7 +13,7 @@
       { "id": "goblin_shaman", "name": "Goblin Shaman", "tier": "elite", "hp": 55, "dmg": 9,  "honest_pct": 60, "pattern": ["GUARD","SLASH","COUNTER","COUNTER"], "special": "hex_drain",  "role": "Counter-heavy mage" },
       { "id": "cave_troll",    "name": "Cave Troll",    "tier": "elite", "hp": 75, "dmg": 11, "honest_pct": 60, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],  "special": "stoneform", "role": "Bruiser" }
     ],
-    "boss": { "id": "goblin_king", "name": "Goblin King", "tier": "boss", "hp": 200, "dmg": 10, "honest_pct": 80, "scheme_every": 3, "pattern": ["SLASH","COUNTER","COUNTER","GUARD","SLASH","COUNTER"], "special": null, "role": "CH1 boss (v1.1 buff 140->200)" }
+    "boss": { "id": "goblin_king", "name": "Goblin King", "tier": "boss", "hp": 200, "dmg": 10, "honest_pct": 80, "scheme_every": 3, "pattern": ["SLASH","COUNTER","COUNTER","GUARD","SLASH","COUNTER"], "special": "war_cry", "role": "CH1 boss (v1.1 buff 140->200; 2.7d war_cry scheme: every 3rd turn roars + next turn ENRAGED+50% w/ 60% honest)" }
   },
   "ch2": {
     "name": "Frost Spire",

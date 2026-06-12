@@ -1,36 +1,198 @@
 import { mountScene } from "./sceneManager.js";
-import { getState } from "../state/store.js";
+import { getState, setState } from "../state/store.js";
 import monstersData from "../data/monsters.json";
 import weaponsData from "../data/weapons.json";
+import relicsData from "../data/relics.json";
+import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
+import {
+  hasRelic,
+  slashDmgBonus,
+  guardExtraBlock,
+  bonusGoldOnBattleWin,
+  goldPerSlashWin,
+  bonusEnergyPerTurn,
+  healOnBattleWin,
+  insightCharmActive,
+  honestIntentTurn,
+  hasTorch,
+  acquireRelic,
+  // 2.7c-2 rares
+  healPerSlashWin,
+  bonusEnergyOnBattleStart,
+  rollGamblersDice,
+  rollFrostbiteFreeze,
+  mirrorReflectFrac,
+  holyWaterReduction,
+  ironWillTriggers,
+  grimoireGainOnCounterWin,
+  canPhoenixRevive,
+  // 2.7c-3 epics
+  devilsBargainSelfDmgPerSlashWin,
+  hasEchoStone,
+  serpentBeltActive,
+  goldenChaliceStartHpFrac,
+  goldenChaliceGoldMult,
+  crownTurnActive,
+  eyeOmniscienceEnemyDmgMult,
+  voidCrownReadCostDelta,
+  voidCrownExtraHonestReveals,
+  hasVoidCrown,
+  canHeartRevive,
+} from "../data/relicEffects.js";
 
 const BASE_PLAYER_HP = 100;
 const MAX_ENERGY = 100;
-const INTENT_ICON = { SLASH: "S", GUARD: "G", COUNTER: "C" };
+const INTENT_ICON = { SLASH: "\u2694\uFE0F", GUARD: "\u{1F6E1}\uFE0F", COUNTER: "\u{1F504}" };
 const BEATS = { SLASH: "COUNTER", GUARD: "SLASH", COUNTER: "GUARD" };
 const RPS = ["SLASH", "GUARD", "COUNTER"];
 
+// --- 2.7a Reward helpers ----------------------------------------------------
+// Gold drop ranges per enemy tier (Locks §8.1 Layer 1)
+const GOLD_RANGE = {
+  normal: [6, 10],
+  elite:  [16, 24],
+  boss:   [36, 44],
+};
+function randInRange(lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); }
+
+// Weighted sampler: pick N distinct relics from a single pool.
+// Excludes already-owned ids so player never sees a duplicate offer.
+function pickFromPool(pool, ownedIds, count) {
+  const working = (pool || []).filter((r) => !ownedIds.includes(r.id));
+  const picks = [];
+  for (let i = 0; i < count && working.length > 0; i++) {
+    const totalWeight = working.reduce((s, r) => s + (r.weight || 1), 0);
+    let roll = Math.random() * totalWeight;
+    let idx = 0;
+    for (let j = 0; j < working.length; j++) {
+      roll -= (working[j].weight || 1);
+      if (roll <= 0) { idx = j; break; }
+    }
+    picks.push(working[idx]);
+    working.splice(idx, 1);
+  }
+  return picks;
+}
+
+// 2.7b: tier-weighted picker for elite (60c/40r) and boss (60r/40e) drops.
+// tierWeights example: { common: 0.6, rare: 0.4 }
+function pickRelicChoicesByTier(ownedIds, count, tierWeights) {
+  const tierPools = {
+    common: relicsData.commons || [],
+    rare:   relicsData.rares   || [],
+    epic:   relicsData.epics   || [],
+  };
+  const tiers = Object.keys(tierWeights);
+  const picks = [];
+  const owned = ownedIds.slice();
+  for (let i = 0; i < count; i++) {
+    // Roll a tier per slot
+    const totalW = tiers.reduce((s, t) => s + tierWeights[t], 0);
+    let roll = Math.random() * totalW;
+    let chosenTier = tiers[0];
+    for (const t of tiers) {
+      roll -= tierWeights[t];
+      if (roll <= 0) { chosenTier = t; break; }
+    }
+    // Pick 1 from that tier
+    const one = pickFromPool(tierPools[chosenTier], owned, 1);
+    if (one.length) {
+      picks.push(one[0]);
+      owned.push(one[0].id);
+    }
+  }
+  return picks;
+}
+
+// Back-compat alias: original placeholder API used commons-only sampling.
+function pickRelicChoices(ownedIds, count) {
+  return pickFromPool(relicsData.commons || [], ownedIds, count);
+}
+// ----------------------------------------------------------------------------
+
 export function battleScene(root, opts) {
   opts = opts || {};
-  const run = getState().run || { mode: "demo", weapon: "sword" };
+  const run = getState().run || { mode: "demo", weapon: "sword", chapter: "CH1", floor: 1, floorMax: 9, gold: 0, relics: [], playerHp: 100, playerMaxHp: 100 };
   const weapon = weaponsData[run.weapon] || weaponsData.sword;
   const S = weapon.stats;
-  const enemyDef = opts.enemy || monstersData.ch1.normals[0];
+  const chapterKey = (run.chapter || "CH1").toLowerCase();
+  const chapterData = monstersData[chapterKey] || monstersData.ch1;
+  const bgImg = chapterData.background || "bg_ch1_goblin_caverns.png";
+
+  // 2.7d M3: enemy pool determined by CURRENT MAP NODE's type (set from map scene),
+  // not floor index. Map scene routes here only for normal/elite/boss nodes.
+  // Fallback to floorMap-based logic if run.map / currentNode missing (legacy/demo entry).
+  const currentFloor = run.floor || 1;
+  const mapCurrentNode = (run.map && run.currentNodeId)
+    ? run.map.nodes.find((nd) => nd.id === run.currentNodeId)
+    : null;
+  const nodeType = (mapCurrentNode && mapCurrentNode.type)
+    ? mapCurrentNode.type
+    : nodeTypeFor(run.chapter || "CH1", currentFloor);
+  const isBossFloor = nodeType === "boss";
+  const isEliteFloor = nodeType === "elite";
+  let enemyDef;
+  if (opts.enemy) {
+    enemyDef = opts.enemy;
+  } else if (isBossFloor) {
+    enemyDef = chapterData.boss || chapterData.normals[0];
+  } else if (isEliteFloor) {
+    const elites = chapterData.elites || chapterData.normals || [];
+    enemyDef = elites[Math.floor(Math.random() * elites.length)];
+  } else {
+    // 2.7b-3 v2c: no-dupe normals per run. Maintain a shuffled queue per chapter.
+    // When queue empty or chapter changed, re-shuffle from chapterData.normals.
+    const pool = chapterData.normals || [];
+    let queue = Array.isArray(run.normalQueue) ? [...run.normalQueue] : [];
+    if (run.normalQueueChapter !== run.chapter || queue.length === 0) {
+      queue = pool.map((m) => m.id);
+      // Fisher-Yates shuffle
+      for (let i = queue.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [queue[i], queue[j]] = [queue[j], queue[i]];
+      }
+    }
+    const nextId = queue.shift();
+    enemyDef = pool.find((m) => m.id === nextId) || pool[0];
+    // persist remaining queue
+    setState({ run: { ...getState().run, normalQueue: queue, normalQueueChapter: run.chapter } });
+  }
   const spriteId = enemyDef.sprite_id || enemyDef.id;
+
+  // Animation queue: filled during resolve(), flushed after render()
+  const anims = [];
+  // 2.7a-patch fix: end overlay should only run its 0.55s delayed fade-in
+  // animation the FIRST time it appears. Re-renders (e.g. tap-to-select relic)
+  // must skip the animation so the overlay doesn't flash transparent each tap.
+  let endOverlayShown = false;
+  const queueFloater = (target, value, kind) => anims.push({ kind: "float", target, value, type: kind });
+  const queueShake = (level) => anims.push({ kind: "shake", level });
+  const queueFlash = (target) => anims.push({ kind: "flash", target });
 
   const state = {
     turn: 1,
-    floor: opts.floor || 1,
-    floorMax: 5,
-    chapter: opts.chapter || "CH1",
+    slashWins: 0, // 2.7c-1: crow_feather counter
+    floor: currentFloor,
+    floorMax: run.floorMax || 9,
+    chapter: run.chapter || "CH1",
+    isBossFloor,
+    rewarded: false, // true after reward overlay handled (prevents double-grant)
+    rewardData: null, // { gold, relicChoices: [...] } when win
+    // 2.7d-stepC: boss reward = optional. Player picks TAKE or SKIP (decision tension).
+    // null = not yet chosen; "take" = relic taken; "skip" = took 50g + 15 HP heal instead.
+    bossRewardTaken: null,
     player: {
-      hp: BASE_PLAYER_HP,
-      maxHp: BASE_PLAYER_HP,
-      energy: 0,
+      hp: (typeof run.playerHp === "number") ? run.playerHp : BASE_PLAYER_HP,
+      maxHp: run.playerMaxHp || BASE_PLAYER_HP,
+      // 2.7a-patch: carry-over from run state
+      energy: (typeof run.energy === "number") ? run.energy : 0,
       maxEnergy: MAX_ENERGY,
-      comboCount: 0,
-      momentumStacks: 0,
-      berserkTurns: 0,
+      comboCount: 0, // RESET per battle (micro chain, not run-level)
+      momentumStacks: (typeof run.momentumStacks === "number") ? run.momentumStacks : 0,
+      berserkTurns: (typeof run.berserkTurns === "number") ? run.berserkTurns : 0,
     },
+    // STUDY (READ) uses remaining this RUN, default 3. Carries between battles.
+    readUsesRemaining: (typeof run.readUses === "number") ? run.readUses : 3,
     enemy: { hp: enemyDef.hp, maxHp: enemyDef.hp, buffs: [] },
     log: [`-- Battle start --`, `${enemyDef.name} appears (HP ${enemyDef.hp})`],
     pendingAction: null,
@@ -39,6 +201,135 @@ export function battleScene(root, opts) {
     actualIntent: null,  // TRUE move (used in resolve)
     foresightQueue: [],  // queued ACTUAL intents for next turns
     foresightActiveThisTurn: false, // true if current intent sourced from foresight queue
+    pendingRelicId: null,           // tap-select highlight on reward overlay
+    showSurrenderConfirm: false,    // in-game confirm modal flag
+    showRunInfo: false,             // 2.7d stepA: in-game RUN INFO modal flag
+    showRelicId: null,              // 2.7e P1: tap-to-show relic tooltip (id of relic shown, or null)
+    warCryThisTurn: false,          // 2.7d batch2: Goblin King roars this turn (no attack, charging)
+    enragedThisTurn: false,         // 2.7d batch2: boss attack this turn is +50% (post war cry)
+    enemyFrozenNextTurn: false,     // 2.7c-2: Frostbite Shard freeze flag
+    enemyFrozenThisTurn: false,     // 2.7c-2: tag intent display as FROZEN
+    // 2.7c-3 epic flags
+    echoLastAction: null,           // last basic-RPS WIN action for Echo Stone
+    echoStreak: 0,                  // current Echo Stone chain length
+    serpentBeltThisTurn: false,     // set at turn-start when serpent_belt fires
+    crownTurnThisTurn: false,       // set at turn-start when crown_of_decision fires
+    voidCrownPendingBonus: false,   // true after a READ if Void Crown owned
+  };
+
+  // 2.7c-3 EPIC battle-start: Golden Chalice -- hp = 50% maxHp at battle start.
+  const chaliceFrac = goldenChaliceStartHpFrac(run);
+  if (chaliceFrac !== null) {
+    const chaliceHp = Math.max(1, Math.floor(state.player.maxHp * chaliceFrac));
+    state.player.hp = chaliceHp;
+    state.log.push(`Golden Chalice: HP set to ${chaliceHp} (50% cap).`);
+  }
+  // 2.7c-3 EPIC battle-start: Crown turn / Serpent belt fire on turn 1 too.
+  if (serpentBeltActive(run, 1)) state.serpentBeltThisTurn = true; // turn 1 not 5, no-op
+  if (crownTurnActive(run, 1)) state.crownTurnThisTurn = true;     // turn 1 not 3, no-op
+
+  // 2.7c-2 BATTLE-START relic effects ----------------------------------------
+  // Cleansing Bell: +20 energy this battle.
+  const bellEnergy = bonusEnergyOnBattleStart(run);
+  if (bellEnergy > 0) {
+    state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + bellEnergy);
+    state.log.push(`Cleansing Bell: +${bellEnergy} energy`);
+  }
+  // Gambler's Dice: 50/50 (+15g) or (-10 HP).
+  const diceRoll = rollGamblersDice(run);
+  if (diceRoll) {
+    if (diceRoll.gold) {
+      // 2.7c-3: Golden Chalice 2x gold from all sources.
+      const dGold = diceRoll.gold * goldenChaliceGoldMult(run);
+      run.gold = (run.gold || 0) + dGold;
+      setState({ run });
+      state.log.push(`Gambler's Dice: +${dGold} gold!`);
+    } else if (diceRoll.hp) {
+      state.player.hp = Math.max(1, state.player.hp + diceRoll.hp); // floor at 1, no instakill
+      state.log.push(`Gambler's Dice: ${diceRoll.hp} HP...`);
+    }
+  }
+
+  // Reward generator: fills state.rewardData. Called once on win.
+  // 2.7b-1 reward gating per Design Doc v1.1 §5.2:
+  //   normal -> gold only (no relic pick)
+  //   elite  -> 3-pick, 60% common + 40% rare per slot
+  //   boss   -> auto-grant 1, 60% rare + 40% epic
+  const generateReward = () => {
+    if (state.rewardData) return; // idempotent
+    const tier = isBossFloor ? "boss" : (isEliteFloor ? "elite" : "normal");
+    const [lo, hi] = GOLD_RANGE[tier] || GOLD_RANGE.normal;
+    // 2.7c-1: gold relics. Bonus = flat per-win + per-SLASH-win count.
+    // 2.7c-3: Golden Chalice 2x gold from all sources on win.
+    const gold = (
+      randInRange(lo, hi)
+      + bonusGoldOnBattleWin(run)
+      + (state.slashWins * goldPerSlashWin(run))
+    ) * goldenChaliceGoldMult(run);
+    let relicChoices = [];
+    let autoGrantedRelic = null;
+    if (tier === "elite") {
+      relicChoices = pickRelicChoicesByTier(run.relics || [], 3, { common: 0.6, rare: 0.4 });
+    } else if (tier === "boss") {
+      const picks = pickRelicChoicesByTier(run.relics || [], 1, { rare: 0.6, epic: 0.4 });
+      autoGrantedRelic = picks[0] || null;
+    }
+    // normal: relicChoices stays [] -> reward overlay shows gold + NEXT FLOOR button
+    state.rewardData = { gold, relicChoices, tier, autoGrantedRelic };
+  };
+
+  // Apply chosen reward to run state, then return to MAP (non-boss only).
+  // 2.7d M3: map = source of truth, scenes return to it after.
+  const applyRewardAndAdvance = (chosenRelicId) => {
+    if (!state.rewardData) return;
+    let newRun = { ...run };
+    newRun.gold = (newRun.gold || 0) + state.rewardData.gold;
+    // Carry-over fields persisted to run state FIRST (so acquireRelic sees fresh HP)
+    newRun.playerHp = state.player.hp;
+    newRun.playerMaxHp = state.player.maxHp;
+    // 2.7c-1: Healing Herb -- heal at end of every battle won
+    const heal = healOnBattleWin(newRun);
+    if (heal > 0) {
+      newRun.playerHp = Math.min(newRun.playerMaxHp, newRun.playerHp + heal);
+    }
+    newRun.relics = (newRun.relics || []).slice();
+    if (chosenRelicId) {
+      newRun = acquireRelic(newRun, chosenRelicId);
+    }
+    newRun.energy = state.player.energy;
+    newRun.momentumStacks = state.player.momentumStacks;
+    newRun.berserkTurns = state.player.berserkTurns;
+    newRun.readUses = state.readUsesRemaining;
+    setState({ run: newRun });
+    mountScene("map", root);
+  };
+
+  // 2.7d-stepC: Boss reward = player choice (TAKE relic vs SKIP for 50g + 15 HP).
+  // Mutates run state but does NOT navigate -- caller (boss-finish click) goes to lobby.
+  const applyBossReward = (took) => {
+    if (!state.rewardData) return;
+    let newRun = { ...run };
+    newRun.gold = (newRun.gold || 0) + state.rewardData.gold;
+    newRun.playerHp = state.player.hp;
+    newRun.playerMaxHp = state.player.maxHp;
+    const heal = healOnBattleWin(newRun);
+    if (heal > 0) newRun.playerHp = Math.min(newRun.playerMaxHp, newRun.playerHp + heal);
+    newRun.relics = (newRun.relics || []).slice();
+    if (took && state.rewardData.autoGrantedRelic) {
+      newRun = acquireRelic(newRun, state.rewardData.autoGrantedRelic.id);
+    } else if (!took) {
+      // SKIP compensation: +50 gold + heal +15 HP (capped at maxHp). Decision tension preserved.
+      newRun.gold = (newRun.gold || 0) + 50;
+      newRun.playerHp = Math.min(newRun.playerMaxHp, newRun.playerHp + 15);
+    }
+    newRun.energy = state.player.energy;
+    newRun.momentumStacks = state.player.momentumStacks;
+    newRun.berserkTurns = state.player.berserkTurns;
+    newRun.readUses = state.readUsesRemaining;
+    newRun.completed = true;
+    setState({ run: newRun });
+    state.bossRewardTaken = took ? "take" : "skip";
+    render();
   };
 
   const honestPct = (typeof enemyDef.honest_pct === "number") ? enemyDef.honest_pct : 100;
@@ -50,9 +341,11 @@ export function battleScene(root, opts) {
     return RPS[Math.floor(Math.random() * 3)];
   };
 
-  const rollDisplayedFor = (actual) => {
+  const rollDisplayedFor = (actual, honestOverride) => {
     // honest_pct% chance display = actual. Else display = one of the OTHER 2 (gocek).
-    if (Math.random() * 100 < honestPct) return actual;
+    // 2.7d batch2: honestOverride lets ENRAGED turn use 60% honest (Goblin King payoff feint).
+    const honest = (typeof honestOverride === "number") ? honestOverride : honestPct;
+    if (Math.random() * 100 < honest) return actual;
     const others = RPS.filter((x) => x !== actual);
     return others[Math.floor(Math.random() * others.length)];
   };
@@ -60,6 +353,8 @@ export function battleScene(root, opts) {
   // Initial roll
   state.actualIntent = rollActualIntent();
   state.intent = rollDisplayedFor(state.actualIntent);
+  // 2.7c-1: Insight Charm forces honest display on turn 1
+  if (insightCharmActive(run, state.turn)) state.intent = state.actualIntent;
 
   const peekActualIntent = (offset) => {
     // For pattern monsters: deterministic. For random: roll fresh (locked into queue).
@@ -69,16 +364,23 @@ export function battleScene(root, opts) {
     return RPS[Math.floor(Math.random() * 3)];
   };
 
+  // 2.7d batch2: boss base dmg, boosted +50% on the enraged turn (post WAR CRY).
+  const enemyBaseDmg = () => state.enragedThisTurn ? Math.round(enemyDef.dmg * 1.5) : enemyDef.dmg;
+
   const intentDmgDisplay = (intent) => {
+    if (intent === "WARCRY") return 0;
     if (intent === "GUARD") return 0;
-    if (intent === "COUNTER") return enemyDef.dmg + 3;
-    return enemyDef.dmg;
+    const base = enemyBaseDmg();
+    if (intent === "COUNTER") return base + 3;
+    return base;
   };
 
   const lossDmgTaken = (action, baseDmg) => {
-    if (action === "GUARD") return Math.floor(baseDmg * (1 - S.guard_dmg_reduction_pct / 100));
-    if (action === "COUNTER") return baseDmg + S.counter_loss_dmg_taken;
-    return baseDmg;
+    // 2.7c-2: Holy Water reduces enemy base dmg at elite/boss floors (min 1).
+    const reduced = Math.max(1, baseDmg - holyWaterReduction(run, isEliteFloor || isBossFloor));
+    if (action === "GUARD") return Math.floor(reduced * (1 - S.guard_dmg_reduction_pct / 100));
+    if (action === "COUNTER") return reduced + S.counter_loss_dmg_taken;
+    return reduced;
   };
 
   // Apply berserk taken multiplier (+50% taken while active)
@@ -93,6 +395,40 @@ export function battleScene(root, opts) {
     return dmg;
   };
 
+  // 2.7c-3: Compute epic taken modifiers (eye +10%, crown +50%, serpent_belt = 0).
+  // Pure function -- returns the FINAL dmg the player should take.
+  // Used for enemy-sourced damage paths (LOSS / WILD / READ / ULT-enemy-hit).
+  // NOT for self-damage (Devil's Bargain) which uses raw value.
+  const epicTakenMod = (taken) => {
+    let t = Math.floor(taken * eyeOmniscienceEnemyDmgMult(run));
+    if (state.crownTurnThisTurn) t = Math.floor(t * 1.5);
+    if (state.serpentBeltThisTurn) t = 0;
+    return t;
+  };
+
+  // 2.7c-3: Compute epic dealt modifiers (crown +50%, serpent_belt x2).
+  // Applied to ALL player dmg paths (basic WIN, WILD, ULT). Echo Stone bonus
+  // already lives inline in the basic-WIN block so it doesn't double-stack.
+  const epicDealtMod = (dmg) => {
+    let d = dmg;
+    if (state.crownTurnThisTurn) d = Math.floor(d * 1.5);
+    if (state.serpentBeltThisTurn) d = d * 2;
+    return d;
+  };
+
+  // 2.7c-2: Apply taken dmg to player, check Iron Will (big hit -> +10 maxHp perm).
+  const applyTakenToPlayer = (taken) => {
+    // 2.7d batch2: during WAR CRY the boss only roars -> deals no damage this turn.
+    if (state.warCryThisTurn) taken = 0;
+    state.player.hp -= taken;
+    if (taken > 0 && ironWillTriggers(run, taken)) {
+      state.player.maxHp += 10;
+      run.playerMaxHp = state.player.maxHp;
+      setState({ run });
+      state.log.push(`Iron Will: +10 MAX HP (perm)`);
+    }
+  };
+
   const tickPlayerBuffs = () => {
     if (state.player.berserkTurns > 0) {
       state.player.berserkTurns--;
@@ -103,67 +439,140 @@ export function battleScene(root, opts) {
   };
 
   const resolve = (action) => {
-    const intent = state.actualIntent; // use TRUE move for RPS resolution (display may have lied)
-    const wasFeint = state.intent !== state.actualIntent;
-    let line = `T${state.turn}: You ${action} vs ${intent}${wasFeint ? " [FEINT!]" : ""} -> `;
+    let intent = state.actualIntent; // use TRUE move for RPS resolution (display may have lied)
+    // 2.7d batch2: WAR CRY turn -- boss roars, no attack. Player's RPS action lands as a
+    // guaranteed free hit (force intent so BEATS[action]===intent -> reuse WIN branch).
+    if (state.warCryThisTurn && (action === "SLASH" || action === "GUARD" || action === "COUNTER")) {
+      intent = BEATS[action];
+    }
+    const wasFeint = !state.warCryThisTurn && state.intent !== state.actualIntent;
+    const intentLabel = state.warCryThisTurn ? "WAR CRY" : intent;
+    let line = `T${state.turn}: You ${action} vs ${intentLabel}${wasFeint ? " [FEINT!]" : ""} -> `;
 
-    if (action === "WILD") {
+    // Snapshot for animation deltas
+    const preEnemyHp = state.enemy.hp;
+    const prePlayerHp = state.player.hp;
+    let didCrit = false;
+    let didHeal = 0;
+    state.lastAction = action; // for sprite swap (SLASH/GUARD/COUNTER/WILD/ULT)
+    state.playerActed = false; // pose swap only if player "acted" (RPS win, WILD, ULT)
+    state.enemyActed = false;  // pose swap only if enemy "acted" (RPS loss, WILD, ULT-with-hit)
+
+    if (action === "READ") {
+      // STUDY (READ) - 2.7a-patch v1.2 lock:
+      //   * 3 uses per RUN (carries between battles, NOT per-battle)
+      //   * cost: 50 energy + skip turn
+      //   * free hit dmg: reduced by 20% (you flinch-defend while reading)
+      //   * reveals next 1 intent AND locks it HONEST (anti-feint)
+      // 2.7c-3: Void Crown -- READ cost -20e and queues 2 honest reveals.
+      const readCost = 50 + voidCrownReadCostDelta(run);
+      state.player.energy -= readCost;
+      state.readUsesRemaining = Math.max(0, state.readUsesRemaining - 1);
+      const reducedHit = Math.floor(enemyDef.dmg * 0.8);
+      let taken = applyBerserkTaken(reducedHit); taken = epicTakenMod(taken);
+      applyTakenToPlayer(taken);
+      const extra = voidCrownExtraHonestReveals(run);
+      if (extra > 0) {
+        state.foresightQueue = [peekActualIntent(1), peekActualIntent(2)];
+      } else {
+        state.foresightQueue = [peekActualIntent(1)];
+      }
+      // Void Crown bonus: next attack WIN gets +10% dmg.
+      if (hasVoidCrown(run)) state.voidCrownPendingBonus = true;
+      line += `STUDY - took ${taken} (-20%), next ${1 + extra} intent(s) locked honest (${state.readUsesRemaining} left)`;
+      // Player still chained an action interruption - reset combo
+      state.player.comboCount = 0;
+      state.playerActed = false;  // no player pose (skip turn)
+      state.enemyActed = true;    // enemy free hit pose
+    } else if (action === "WILD") {
       state.player.energy -= S.ws_cost;
       let dmg = S.ws_dmg;
       dmg = applyBerserkDealt(dmg);
+      dmg = epicDealtMod(dmg); // 2.7c-3: Crown/Serpent apply to WILD too
       state.enemy.hp -= dmg;
-      const taken = applyBerserkTaken(enemyDef.dmg);
-      state.player.hp -= taken;
-      line += `WILD ${dmg} dmg, took ${taken}`;
+      // 2.7b-2: WILD halves incoming dmg (berserk multiplier first, then halve)
+      let taken = Math.floor(applyBerserkTaken(enemyDef.dmg) / 2); taken = epicTakenMod(taken);
+      applyTakenToPlayer(taken);
+      line += `WILD ${dmg} dmg, took ${taken} (-50%)`;
       state.player.comboCount = 0;
       state.player.momentumStacks = 0;
+      state.playerActed = true; // WILD = always attack pose
+      state.enemyActed = true;  // WILD = enemy still hits
     } else if (action === "ULT") {
       state.player.energy -= S.ult_cost;
       if (weapon.id === "sword") {
         let dmg = 25;
         dmg = applyBerserkDealt(dmg);
+        dmg = epicDealtMod(dmg); // 2.7c-3: Crown/Serpent apply to ULT too
         state.enemy.hp -= dmg;
-        const taken = applyBerserkTaken(enemyDef.dmg);
-        state.player.hp -= taken;
-        line += `BLADE RUSH ${dmg} dmg, took ${taken}`;
+        // 2.7b-2d: ULT halves incoming dmg (you paid 100e, deserve safer turn)
+        let taken = Math.floor(applyBerserkTaken(enemyDef.dmg) / 2); taken = epicTakenMod(taken);
+        applyTakenToPlayer(taken);
+        line += `BLADE RUSH ${dmg} dmg, took ${taken} (-50%)`;
       } else if (weapon.id === "spear") {
-        // Foresight: skip turn (0 dmg from you), enemy hits free, reveal next 2 ACTUAL
-        const taken = applyBerserkTaken(enemyDef.dmg);
-        state.player.hp -= taken;
+        // Foresight: skip turn (0 dmg from you), enemy hits free (halved), reveal next 2 ACTUAL
+        let taken = Math.floor(applyBerserkTaken(enemyDef.dmg) / 2); taken = epicTakenMod(taken);
+        applyTakenToPlayer(taken);
         state.foresightQueue = [peekActualIntent(1), peekActualIntent(2)];
-        line += `FORESIGHT - skip, took ${taken}, next 2 actuals locked & revealed`;
+        line += `FORESIGHT - skip, took ${taken} (-50%), next 2 actuals locked & revealed`;
       } else if (weapon.id === "axe") {
-        // Berserk: ULT activation turn = NORMAL hit (buff not yet active). Then 2 turns of +100% dealt / +50% taken.
-        const taken = enemyDef.dmg; // raw, berserk not active yet on activation turn
-        state.player.hp -= taken;
+        // Berserk: ULT activation turn = halved hit. Then 2 turns of +100% dealt / +50% taken.
+        let taken = Math.floor(enemyDef.dmg / 2); taken = epicTakenMod(taken); // raw halved + epic mods
+        applyTakenToPlayer(taken);
         state.player.berserkTurns = 3; // 3 because end-of-turn tick reduces to 2 = 2 active buff turns
-        line += `BERSERK ON (next 2 turns), took ${taken}`;
+        line += `BERSERK ON (next 2 turns), took ${taken} (-50%)`;
       } else if (weapon.id === "staff") {
-        // Purify: heal 15, restore 40 energy. Enemy still hits.
+        // Purify: heal 15, restore 40 energy. Enemy hit halved.
         const healAmt = Math.min(15, state.player.maxHp - state.player.hp);
+        didHeal += healAmt;
         state.player.hp += healAmt;
         state.player.energy = Math.min(state.player.maxEnergy, state.player.energy + 40);
-        const taken = applyBerserkTaken(enemyDef.dmg);
-        state.player.hp -= taken;
-        line += `PURIFY +${healAmt} HP +40e, took ${taken}`;
+        let taken = Math.floor(applyBerserkTaken(enemyDef.dmg) / 2); taken = epicTakenMod(taken);
+        applyTakenToPlayer(taken);
+        line += `PURIFY +${healAmt} HP +40e, took ${taken} (-50%)`;
       } else {
         let dmg = applyBerserkDealt(20);
+        dmg = epicDealtMod(dmg); // 2.7c-3
         state.enemy.hp -= dmg;
         line += `ULT ${dmg} dmg (stub)`;
       }
       state.player.comboCount = 0;
       state.player.momentumStacks = 0;
+      state.playerActed = true; // ULT = always player pose (Murid rule)
+      // Enemy poses only when ULT also caused player to take dmg (i.e. enemy hit you)
+      if (prePlayerHp - state.player.hp > 0) state.enemyActed = true;
     } else {
       // Normal RPS
       if (action === intent) {
         line += "DRAW (0/0)";
         state.player.comboCount = 0;
         state.player.momentumStacks = 0;
-        state.player.energy += Math.floor(S.energy_regen_per_turn / 2);
+        // 2.7c-3: Echo Stone resets on DRAW.
+        state.echoStreak = 0;
+        state.echoLastAction = null;
+        state.player.energy += Math.floor(S.energy_regen_per_turn / 2) + Math.floor(bonusEnergyPerTurn(run) / 2);
+        // DRAW cue: small shake + both sprites bump (no one wins this round)
+        queueShake("small");
+        anims.push({ kind: "bump", target: "player" });
+        anims.push({ kind: "bump", target: "enemy" });
       } else if (BEATS[action] === intent) {
         // WIN
         state.player.comboCount++;
         let dmg = action === "SLASH" ? S.slash_dmg : action === "COUNTER" ? S.counter_win_dmg : S.guard_win_dmg;
+
+        // 2.7b-2 Campfire SHARPEN buff: +N per action stack (permanent for run)
+        const __buffs = run.actionBuffs || {};
+        const __buffKey = action.toLowerCase(); // slash | guard | counter
+        dmg += (__buffs[__buffKey] || 0);
+
+        // 2.7c-1+2.7c-2: Relic SLASH dmg bonuses (broken_dagger +1, whetstone +2, berserker_stone +3 if <30% HP)
+        if (action === "SLASH") {
+          // Live run snapshot so Berserker Stone sees the *current* battle HP.
+          const liveRun = { ...run, playerHp: state.player.hp, playerMaxHp: state.player.maxHp };
+          dmg += slashDmgBonus(liveRun);
+          // Crow Feather: +2 gold per SLASH win (tracked, paid in reward)
+          state.slashWins += 1;
+        }
 
         // Sword Momentum
         if (weapon.id === "sword" && (action === "SLASH" || action === "COUNTER")) {
@@ -184,38 +593,119 @@ export function battleScene(root, opts) {
           if (Math.random() < 0.1) {
             dmg *= 2;
             crit = true;
+            didCrit = true;
           }
         }
 
-        // Combo 3+ bonus
+        // Combo 3+ bonus (Locks v1.2: +10%, was +50%)
         if (state.player.comboCount >= 3) {
-          dmg = Math.floor(dmg * 1.5);
+          dmg = Math.floor(dmg * 1.1);
         }
 
         // Berserk dealt multiplier
         dmg = applyBerserkDealt(dmg);
 
+        // 2.7c-3 EPIC: Echo Stone -- same basic action 2+ WIN streak -> +25%.
+        if (hasEchoStone(run)) {
+          if (state.echoLastAction === action) {
+            state.echoStreak += 1;
+          } else {
+            state.echoStreak = 1;
+            state.echoLastAction = action;
+          }
+          if (state.echoStreak >= 2) {
+            const before = dmg;
+            dmg = Math.floor(dmg * 1.25);
+            line += ` [Echo x${state.echoStreak} +${dmg - before}]`;
+          }
+        }
+        // 2.7c-3 EPIC: Crown + Serpent Belt modifiers via epicDealtMod.
+        dmg = epicDealtMod(dmg);
+        // 2.7c-3 EPIC: Void Crown -- next attack after READ +10% IF attack action.
+        if (state.voidCrownPendingBonus && (action === "SLASH" || action === "COUNTER")) {
+          const before = dmg;
+          dmg = Math.floor(dmg * 1.1);
+          state.voidCrownPendingBonus = false;
+          line += ` [VoidCrown +${dmg - before}]`;
+        }
+
         state.enemy.hp -= dmg;
         line += `WIN deal ${dmg}${crit ? " * CRIT!" : ""}`;
-        state.player.energy += S.energy_regen_per_turn;
+        state.player.energy += S.energy_regen_per_turn + bonusEnergyPerTurn(run);
+        state.playerActed = true; // RPS WIN = player pose
+
+        // 2.7c-2 rare hooks on RPS WIN
+        if (action === "SLASH") {
+          // 2.7c-3 EPIC: Devil's Bargain -- self-dmg per SLASH win.
+          const selfDmg = devilsBargainSelfDmgPerSlashWin(run);
+          if (selfDmg > 0) {
+            applyTakenToPlayer(selfDmg);
+            line += ` (-${selfDmg} self Devil's Bargain)`;
+          }
+          // Vampire Fang: heal per SLASH win
+          const vHeal = healPerSlashWin(run);
+          if (vHeal > 0 && state.player.hp < state.player.maxHp) {
+            const before = state.player.hp;
+            state.player.hp = Math.min(state.player.maxHp, state.player.hp + vHeal);
+            didHeal += state.player.hp - before;
+            line += ` (+${state.player.hp - before} HP Fang)`;
+          }
+          // Frostbite Shard: 15% chance to freeze enemy next turn
+          if (rollFrostbiteFreeze(run)) {
+            state.enemyFrozenNextTurn = true;
+            line += " (Frostbite!)";
+          }
+        }
+        if (action === "GUARD") {
+          // Mirror Shield: reflect 50% of base enemy dmg on GUARD win
+          const frac = mirrorReflectFrac(run);
+          if (frac > 0) {
+            const reflect = Math.floor(enemyDef.dmg * frac);
+            if (reflect > 0) {
+              state.enemy.hp -= reflect;
+              line += ` (Mirror +${reflect})`;
+            }
+          }
+        }
+        if (action === "COUNTER") {
+          // Chained Grimoire: +1 SLASH dmg perm (cap 3 stacks per run)
+          if (grimoireGainOnCounterWin(run) > 0) {
+            run.grimoireStacks = (run.grimoireStacks || 0) + 1;
+            run.actionBuffs = { ...(run.actionBuffs || {}) };
+            run.actionBuffs.slash = (run.actionBuffs.slash || 0) + 1;
+            setState({ run });
+            line += " (Grimoire SLASH+1)";
+          }
+        }
 
         // Staff Arcane Recovery: +1 HP per RPS win, cap maxHp
         if (weapon.id === "staff") {
           if (state.player.hp < state.player.maxHp) {
             state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1);
+            didHeal += 1;
             line += " (+1 HP)";
           }
         }
       } else {
         // LOSS
-        const base = enemyDef.dmg;
+        const base = enemyBaseDmg(); // 2.7d batch2: +50% on enraged turn
         let taken = lossDmgTaken(action, base);
         taken = applyBerserkTaken(taken);
-        state.player.hp -= taken;
+        // 2.7c-1: Iron Buckler -- GUARD blocks +3 extra dmg
+        if (action === "GUARD") {
+          taken = Math.max(0, taken - guardExtraBlock(run));
+        }
+        // 2.7c-3 EPIC: eye/crown/serpent modifiers.
+        taken = epicTakenMod(taken);
+        applyTakenToPlayer(taken);
         line += `LOSS took ${taken}`;
         state.player.comboCount = 0;
         state.player.momentumStacks = 0;
-        state.player.energy += S.energy_regen_per_turn;
+        // 2.7c-3: Echo Stone resets on LOSS.
+        state.echoStreak = 0;
+        state.echoLastAction = null;
+        state.player.energy += S.energy_regen_per_turn + bonusEnergyPerTurn(run);
+        state.enemyActed = true; // RPS LOSS = enemy pose
       }
     }
 
@@ -225,9 +715,50 @@ export function battleScene(root, opts) {
     state.log.push(line);
     console.log(`[battle] ${line}`);
 
+    // Queue animations based on deltas
+    const enemyDmgDealt = preEnemyHp - state.enemy.hp;
+    const playerDmgTaken = prePlayerHp - state.player.hp + didHeal; // exclude healing from "taken" count
+    if (enemyDmgDealt > 0) {
+      queueFloater("enemy", enemyDmgDealt, didCrit ? "crit" : "dmg");
+      queueFlash("enemy");
+      queueShake(didCrit || enemyDmgDealt >= 20 ? "big" : "small");
+    }
+    if (playerDmgTaken > 0) {
+      queueFloater("player", playerDmgTaken, "dmg");
+      queueFlash("player");
+      queueShake(playerDmgTaken >= 15 ? "big" : "small");
+    }
+    // Sprite pose swap: only the WINNER of the round gets the attack pose (Murid rule).
+    // ULT always gives player a pose, WILD gives both. enemyActed/playerActed set above.
+    state.enemyAttacked = state.enemyActed;
+    if (!state.playerActed) state.lastAction = null; // skip player pose swap on loss/draw
+    if (didHeal > 0) {
+      queueFloater("player", didHeal, "heal");
+    }
+
+    // 2.7c-2: Phoenix Ember -- one-shot revive at 30 HP if lethal hit landed.
+    // 2.7c-3: Heart of Nimblade stacks (each consumes its own charge).
+    // Runs BEFORE end checks so revive overrides the DEFEAT branch.
+    if (state.player.hp <= 0 && state.enemy.hp > 0) {
+      if (canPhoenixRevive(run)) {
+        state.player.hp = 30;
+        run.phoenixUsed = true;
+        run.playerHp = 30;
+        setState({ run });
+        state.log.push("* PHOENIX EMBER -- revived at 30 HP! *");
+      } else if (canHeartRevive(run)) {
+        state.player.hp = 30;
+        run.heartUsed = true;
+        run.playerHp = 30;
+        setState({ run });
+        state.log.push("* HEART OF NIMBLADE -- revived at 30 HP! *");
+      }
+    }
+
     if (state.enemy.hp <= 0) {
       state.ended = "win";
       state.log.push("* VICTORY *");
+      generateReward();
     } else if (state.player.hp <= 0) {
       state.ended = "lose";
       state.log.push("x DEFEAT x");
@@ -235,6 +766,24 @@ export function battleScene(root, opts) {
       state.turn++;
       // Tick player buffs (berserk countdown)
       tickPlayerBuffs();
+      // 2.7c-3 EPIC: turn-tick flags for Crown of Decision / Serpent Belt.
+      state.crownTurnThisTurn = crownTurnActive(run, state.turn);
+      state.serpentBeltThisTurn = serpentBeltActive(run, state.turn);
+      if (state.crownTurnThisTurn) state.log.push(`Crown Turn -- all dmg x1.5 both sides.`);
+      if (state.serpentBeltThisTurn) state.log.push(`Serpent Belt -- 0 dmg taken, 2x dmg dealt.`);
+      // 2.7d batch2: GOBLIN KING WAR CRY scheme bookkeeping (decide BEFORE rolling intent,
+      // so the ENRAGED turn can roll its displayed intent at honest_pct=60 instead of 80).
+      // Gate: only bosses tagged special="war_cry" run this scheme (Ice Queen / Dracula
+      // have their own future schemes -- they don't trigger this one).
+      const prevWarCry = state.warCryThisTurn;
+      state.warCryThisTurn = false;
+      state.enragedThisTurn = false;
+      const isWarCryBoss = isBossFloor && enemyDef.special === "war_cry";
+      const schemeEvery = (isWarCryBoss && typeof enemyDef.scheme_every === "number" && enemyDef.scheme_every > 0)
+        ? enemyDef.scheme_every : 0;
+      const startEnragedTurn = prevWarCry; // this new turn pays off the previous WAR CRY
+      const startWarCryTurn = !startEnragedTurn && schemeEvery > 0 && state.turn % schemeEvery === 0;
+
       // Roll next intent: actual first (prefer foresight queue = honest display), else normal gocek roll
       if (state.foresightQueue.length > 0) {
         state.actualIntent = state.foresightQueue.shift();
@@ -242,26 +791,65 @@ export function battleScene(root, opts) {
         state.foresightActiveThisTurn = true;
       } else {
         state.actualIntent = rollActualIntent();
-        state.intent = rollDisplayedFor(state.actualIntent);
+        // 2.7d batch2: ENRAGED turn -> intent display lies more often (60% honest, Murid's fix).
+        const honestForThisRoll = startEnragedTurn ? 60 : undefined;
+        state.intent = rollDisplayedFor(state.actualIntent, honestForThisRoll);
         state.foresightActiveThisTurn = false;
+        // 2.7c-2: Time Glass / Eye of Omniscience forces honest display on turns 1-2.
+        // 2.7c-3: Crown of Decision OVERRIDES -- intent uses chapter honesty (can lie).
+        // NOTE: enraged turn intentionally bypasses honestIntentTurn so the feint can land.
+        if (honestIntentTurn(run, state.turn) && !state.crownTurnThisTurn && !startEnragedTurn) {
+          state.intent = state.actualIntent;
+        }
+      }
+      // 2.7c-2: Frostbite freeze applies to THIS new turn.
+      if (state.enemyFrozenNextTurn) {
+        state.enemyFrozenNextTurn = false;
+        state.enemyFrozenThisTurn = true;
+        state.actualIntent = "GUARD"; // enemy guards = deals 0
+        state.intent = "GUARD";
+        state.log.push("Enemy is FROZEN -- guards this turn.");
+      } else {
+        state.enemyFrozenThisTurn = false;
+      }
+
+      // 2.7d batch2: now apply WAR CRY / ENRAGED flags + telegraphs (frozen skips scheme).
+      if (startEnragedTurn && !state.enemyFrozenThisTurn) {
+        state.enragedThisTurn = true;
+        state.log.push("* GOBLIN KING is ENRAGED -- next blow deals +50% (intent may lie!) *");
+      } else if (startWarCryTurn && !state.enemyFrozenThisTurn) {
+        state.warCryThisTurn = true;
+        state.actualIntent = "WARCRY";
+        state.intent = "WARCRY";
+        state.log.push("* GOBLIN KING lets out a WAR CRY -- charging a heavy blow (no attack)! *");
       }
     }
   };
 
-  window.cheat = {
+  // 2.7c-2: extend global cheat (defined in main.js) with battle-only commands.
+  window.cheat = window.cheat || {};
+  Object.assign(window.cheat, {
     energy: (n) => { state.player.energy = n; render(); console.log(`[cheat] energy=${n}`); },
     enemyHp: (n) => { state.enemy.hp = n; render(); console.log(`[cheat] enemyHp=${n}`); },
     playerHp: (n) => { state.player.hp = n; render(); console.log(`[cheat] playerHp=${n}`); },
-    win: () => { state.enemy.hp = 0; state.ended = "win"; state.log.push("* CHEAT VICTORY *"); render(); },
+    win: () => { state.enemy.hp = 0; state.ended = "win"; state.log.push("* CHEAT VICTORY *"); generateReward(); render(); },
     lose: () => { state.player.hp = 0; state.ended = "lose"; state.log.push("x CHEAT DEFEAT x"); render(); },
-    help: () => console.log("cheat.energy(n) | cheat.enemyHp(n) | cheat.playerHp(n) | cheat.win() | cheat.lose()"),
-  };
-  console.log("[cheat] available: cheat.help()");
+  });
+  console.log("[cheat] battle commands active -- cheat.help()");
 
   const render = () => {
     const intent = state.intent;
     const intentIcon = INTENT_ICON[intent] || "?";
     const idmg = intentDmgDisplay(intent);
+    // 2.7d batch2: WAR CRY + ENRAGED intent telegraph (Goblin King).
+    let intentHtml;
+    if (state.warCryThisTurn || intent === "WARCRY") {
+      intentHtml = `INTENT: <span class="b-intent__warcry">\u26A1 WAR CRY -- charging</span>`;
+    } else {
+      const dmgText = intent === "GUARD" ? "defends" : `${idmg} DMG`;
+      const enragedTag = state.enragedThisTurn ? ` <span class="b-intent__enraged">\u26A1 ENRAGED +50%</span>` : "";
+      intentHtml = `INTENT: ${intentIcon} ${intent} -- <strong>${dmgText}</strong>${enragedTag}`;
+    }
     const ultCost = S.ult_cost;
     const canUlt = !state.ended && state.player.energy >= ultCost;
     const canWild = !state.ended && state.player.energy >= S.ws_cost;
@@ -280,15 +868,16 @@ export function battleScene(root, opts) {
       ? state.enemy.buffs.map((b) => `<span class="b-chip">${b}</span>`).join("")
       : `<span class="b-chip b-chip--none">none</span>`;
 
-    // Foresight reveal
+    // 2.7d batch5: compact FORESIGHT to single chip line (was 2-line on iPhone SE).
+    // Format: `[FORESIGHT] HONEST -- next [COUNTER] [SLASH]` or `next [COUNTER]`.
     let foresightHtml = "";
     if (state.foresightActiveThisTurn) {
       const nextChips = state.foresightQueue.length
-        ? ` NEXT: ${state.foresightQueue.map(i => `<span class="b-fs-chip">${INTENT_ICON[i]} ${i}</span>`).join(" ")}`
+        ? ` <span class="b-foresight__sep">--</span> next ${state.foresightQueue.map(i => `<span class="b-fs-chip">${INTENT_ICON[i]} ${i}</span>`).join(" ")}`
         : "";
-      foresightHtml = `<div class="b-foresight">FORESIGHT - this intent is HONEST.${nextChips}</div>`;
+      foresightHtml = `<div class="b-foresight"><span class="b-foresight__tag">FORESIGHT</span><span class="b-foresight__txt">HONEST${nextChips}</span></div>`;
     } else if (state.foresightQueue.length) {
-      foresightHtml = `<div class="b-foresight">NEXT: ${state.foresightQueue.map(i => `<span class="b-fs-chip">${INTENT_ICON[i]} ${i}</span>`).join(" ")}</div>`;
+      foresightHtml = `<div class="b-foresight"><span class="b-foresight__tag">FORESIGHT</span><span class="b-foresight__txt">next ${state.foresightQueue.map(i => `<span class="b-fs-chip">${INTENT_ICON[i]} ${i}</span>`).join(" ")}</span></div>`;
     }
 
     const pHpPct = (state.player.hp / state.player.maxHp) * 100;
@@ -304,7 +893,7 @@ export function battleScene(root, opts) {
         <div class="b-act__sub">Beats ${beats}</div>
       </button>`;
     };
-    const logHtml = state.log.slice(-5).map((l) => `<div>${l}</div>`).join("");
+    const logHtml = state.log.slice(-3).map((l) => `<div>${l}</div>`).join("");
 
     // Confirm bar with berserk warning
     let confirmExtra = "";
@@ -318,14 +907,210 @@ export function battleScene(root, opts) {
         <button class="btn btn--secondary b-confirm__no" data-action="cancel">CANCEL</button>
       </div>` : "";
 
-    const endOverlay = state.ended ? `
-      <div class="b-end b-end--${state.ended}">
-        <div class="b-end__title">${state.ended === "win" ? "* VICTORY *" : "x DEFEAT x"}</div>
-        <div class="b-end__sub">${state.ended === "win" ? `${enemyDef.name} defeated in ${state.turn} turns` : `You fell to ${enemyDef.name}`}</div>
-        <div class="b-end__stats">HP ${state.player.hp}/${state.player.maxHp} - Combo max ${state.player.comboCount}</div>
+    // End / Reward overlay
+    // If overlay already shown once this scene, skip entry animation to
+    // prevent flash on every re-render (e.g. relic tap-to-select).
+    const noAnim = endOverlayShown ? "b-end--no-anim" : "";
+    let endOverlay = "";
+    if (state.ended === "lose") {
+      endOverlay = `
+      <div class="b-end b-end--lose ${noAnim}">
+        <div class="b-end__title">x GAME OVER x</div>
+        <div class="b-end__sub">You fell to ${enemyDef.name} on Floor ${state.floor}/${state.floorMax}</div>
+        <div class="b-end__stats">Gold earned: ${run.gold || 0} - Relics: ${(run.relics || []).length}</div>
         <button class="btn btn--primary b-end__btn" data-action="end-back">BACK TO LOBBY</button>
-      </div>` : "";
+      </div>`;
+    } else if (state.ended === "win" && state.isBossFloor) {
+      // 2.7d-stepC: Boss reward = player CHOICE. Two phases:
+      //   Phase 1 (bossRewardTaken === null): show relic + TAKE / SKIP buttons
+      //   Phase 2 (bossRewardTaken set): show CHAPTER COMPLETE celebration + back to lobby
+      const rwd = state.rewardData || { gold: 0, autoGrantedRelic: null };
+      const granted = rwd.autoGrantedRelic;
+      if (state.bossRewardTaken === null) {
+        // Phase 1: reward choice
+        const grantedCard = granted ? `
+          <div class="b-reward__pick">BOSS RELIC -- TAKE OR SKIP?</div>
+          <div class="b-reward__relics">
+            <div class="b-reward__relic b-reward__relic--selected b-reward__relic--auto">
+              <span class="b-reward__relic-name">${granted.name}</span>
+              <span class="b-reward__relic-desc">${granted.description}</span>
+              <span class="b-reward__relic-tier">${(granted.tier || "rare").toUpperCase()}</span>
+            </div>
+          </div>` : "";
+        endOverlay = `
+        <div class="b-end b-end--win b-end--reward ${noAnim}">
+          <div class="b-reward__head">
+            <div class="b-reward__title">* BOSS DOWN *</div>
+            <div class="b-reward__sub">${enemyDef.name} defeated in ${state.turn} turns</div>
+            <div class="b-reward__gold">+${rwd.gold} gold (total ${(run.gold || 0) + rwd.gold})</div>
+          </div>
+          ${grantedCard}
+          <div class="b-reward__actions">
+            <button class="btn btn--primary" data-action="boss-take">TAKE RELIC</button>
+            <button class="btn btn--secondary" data-action="boss-skip">SKIP -- +50 gold, +15 HP</button>
+          </div>
+        </div>`;
+      } else {
+        // Phase 2: chapter / demo complete celebration
+        const finalRun = getState().run || run;
+        const isDemoMode = (finalRun.mode || run.mode) === "demo";
+        const tookText = state.bossRewardTaken === "take"
+          ? `Relic gained: <strong>${granted ? granted.name : "(none)"}</strong>`
+          : `Skipped boss relic. <strong>+50 gold, +15 HP</strong> recovered.`;
+        const ctaTitle = isDemoMode ? "\u2728 DEMO COMPLETE \u2728" : "\u2728 CHAPTER 1 COMPLETE \u2728";
+        const ctaSub = isDemoMode
+          ? "Goblin King defeated! To unlock CH2 and CH3, connect your Nimiq wallet and start a full run."
+          : "Goblin King defeated! CH2 launches soon -- your progress carries over.";
+        const ctaButtons = isDemoMode ? `
+            <button class="btn btn--primary b-end__btn" data-action="boss-finish">CONNECT WALLET &amp; PLAY CH2</button>
+            <button class="btn btn--secondary b-end__btn" data-action="boss-finish">BACK TO LOBBY</button>` : `
+            <button class="btn btn--primary b-end__btn" data-action="boss-finish">RETURN TO LOBBY</button>`;
+        endOverlay = `
+        <div class="b-end b-end--win b-end--complete ${noAnim}">
+          <div class="b-end__title">${ctaTitle}</div>
+          <div class="b-end__sub">${ctaSub}</div>
+          <div class="b-end__stats">${tookText}</div>
+          <div class="b-end__stats">Final HP ${finalRun.playerHp}/${finalRun.playerMaxHp} -- Gold ${finalRun.gold || 0} -- Relics ${(finalRun.relics || []).length}</div>
+          ${ctaButtons}
+        </div>`;
+      }
+    } else if (state.ended === "win") {
+      // Between-floor reward. 2.7b-1: gating by node tier.
+      //   normal -> gold only, NEXT FLOOR
+      //   elite  -> 3-pick (60c/40r), CONFIRM or skip
+      const rwd = state.rewardData || { gold: 0, relicChoices: [], tier: "normal" };
+      const isEliteReward = rwd.tier === "elite";
+      const hasRelicPick = isEliteReward && (rwd.relicChoices || []).length > 0;
+      const relicCards = (rwd.relicChoices || []).map((r) => {
+        const sel = state.pendingRelicId === r.id ? "b-reward__relic--selected" : "";
+        return `
+        <button class="b-reward__relic ${sel}" data-action="select-relic" data-relic="${r.id}">
+          <span class="b-reward__relic-name">${r.name}</span>
+          <span class="b-reward__relic-desc">${r.description}</span>
+          <span class="b-reward__relic-tier">${(r.tier || "common").toUpperCase()}</span>
+        </button>`;
+      }).join("");
+      const confirmDisabled = state.pendingRelicId ? "" : "disabled";
+      const confirmLabel = state.pendingRelicId ? "CONFIRM PICK" : "SELECT A RELIC FIRST";
+      if (hasRelicPick) {
+        // ELITE reward -- relic pick layout (scrollable, unchanged)
+        endOverlay = `
+        <div class="b-end b-end--win b-end--reward ${noAnim}">
+          <div class="b-reward__head">
+            <div class="b-reward__title">* ELITE DOWN *</div>
+            <div class="b-reward__sub">Floor ${state.floor}/${state.floorMax} cleared - ${enemyDef.name} down in ${state.turn} turns</div>
+            <div class="b-reward__gold">+${rwd.gold} gold (total ${(run.gold || 0) + rwd.gold})</div>
+          </div>
+          <div class="b-reward__pick">ELITE DROP - PICK 1 RELIC</div>
+          <div class="b-reward__relics">${relicCards}</div>
+          <div class="b-reward__actions">
+            <button class="btn btn--primary b-reward__confirm" data-action="confirm-relic" ${confirmDisabled}>${confirmLabel}</button>
+            <button class="btn btn--secondary b-reward__skip" data-action="skip-relic">Skip (gold only)</button>
+          </div>
+        </div>`;
+      } else {
+        // 2.7d batch1: NORMAL win -- 3-zone layout (top title / mid info card / bottom NEXT FLOOR)
+        endOverlay = `
+        <div class="b-end b-end--win b-end--winsimple ${noAnim}">
+          <div class="b-win__top">
+            <div class="b-win__title">* VICTORY *</div>
+          </div>
+          <div class="b-win__mid">
+            <div class="b-win__card">
+              <div class="b-win__row"><span>Floor cleared</span><strong>${state.floor}/${state.floorMax}</strong></div>
+              <div class="b-win__row"><span>Enemy</span><strong>${enemyDef.name}</strong></div>
+              <div class="b-win__row"><span>Rounds</span><strong>${state.turn}</strong></div>
+              <div class="b-win__row"><span>Gold gained</span><strong>+${rwd.gold}</strong></div>
+              <div class="b-win__row b-win__row--total"><span>Total gold</span><strong>${(run.gold || 0) + rwd.gold}</strong></div>
+            </div>
+          </div>
+          <div class="b-win__bottom">
+            <button class="btn btn--primary b-win__next" data-action="skip-relic">NEXT FLOOR</button>
+          </div>
+        </div>`;
+      }
+    }
 
+    // SURRENDER confirm modal (custom in-game, not browser confirm())
+    let surrenderModal = "";
+    if (state.showSurrenderConfirm) {
+      surrenderModal = `
+      <div class="b-modal-bg">
+        <div class="b-modal">
+          <div class="b-modal__title">SURRENDER?</div>
+          <div class="b-modal__body">You'll abandon this run. Gold & relics earned this run will be lost.</div>
+          <div class="b-modal__actions">
+            <button class="btn btn--secondary" data-action="surrender-cancel">CANCEL</button>
+            <button class="btn btn--primary b-modal__danger" data-action="surrender-yes">YES, SURRENDER</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // 2.7d stepA: RUN INFO modal (custom in-game, replaces native alert())
+    let runInfoModal = "";
+    if (state.showRunInfo) {
+      const rls = (run.relics || []);
+      // 2.7d batch2: lookup relic name + description from relics.json (across all tiers).
+      const allRelics = [
+        ...(relicsData.commons || []),
+        ...(relicsData.rares || []),
+        ...(relicsData.epics || []),
+        ...(relicsData.special || []),
+      ];
+      const relicMap = {};
+      allRelics.forEach((r) => { relicMap[r.id] = r; });
+      const tierIcon = (t) => t === "epic" ? "\u2728" : (t === "rare" ? "\u2734\ufe0f" : "\u25c6");
+      const escHtml = (s) => String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      const rlsHtml = rls.length === 0
+        ? `<div class="b-modal__row b-modal__row--muted">none yet</div>`
+        : rls.map((rid) => {
+            const r = relicMap[rid];
+            if (!r) return `<div class="b-modal__row b-modal__row--relic">- ${escHtml(rid)}</div>`;
+            const icon = tierIcon(r.tier);
+            return `<div class="b-modal__row b-modal__row--relic">
+              <div class="b-modal__relic-name">${icon} ${escHtml(r.name)}</div>
+              <div class="b-modal__relic-desc">${escHtml(r.description || "")}</div>
+            </div>`;
+          }).join("");
+      runInfoModal = `
+      <div class="b-modal-bg" data-action="runinfo-close">
+        <div class="b-modal b-modal--info" data-action="runinfo-stop">
+          <div class="b-modal__title">RUN INFO</div>
+          <div class="b-modal__body">
+            <div class="b-modal__section">
+              <div class="b-modal__row"><span>Mode</span><strong>${run.mode || "demo"}</strong></div>
+              <div class="b-modal__row"><span>Weapon</span><strong>${weapon.name}</strong></div>
+              <div class="b-modal__row"><span>Floor</span><strong>${state.floor}/${state.floorMax}</strong></div>
+              <div class="b-modal__row"><span>Gold</span><strong>${run.gold || 0}</strong></div>
+            </div>
+            <div class="b-modal__section">
+              <div class="b-modal__sub">CARRY-OVER (LIVE)</div>
+              <div class="b-modal__row"><span>HP</span><strong>${state.player.hp}/${state.player.maxHp}</strong></div>
+              <div class="b-modal__row"><span>Energy</span><strong>${state.player.energy}/${state.player.maxEnergy}</strong></div>
+              <div class="b-modal__row"><span>Momentum</span><strong>${state.player.momentumStacks}</strong></div>
+              <div class="b-modal__row"><span>Berserk turns left</span><strong>${state.player.berserkTurns}</strong></div>
+              <div class="b-modal__row"><span>STUDY uses left</span><strong>${state.readUsesRemaining}/3</strong></div>
+            </div>
+            <div class="b-modal__section">
+              <div class="b-modal__sub">RELICS (${rls.length})</div>
+              ${rlsHtml}
+            </div>
+          </div>
+          <div class="b-modal__actions">
+            <button class="btn btn--primary" data-action="runinfo-close">CLOSE</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // 2.7c-3: Void Crown -- READ cost reduced.
+    const readCostUi = 50 + voidCrownReadCostDelta(run);
+    const canRead = !state.ended && state.readUsesRemaining > 0 && state.player.energy >= readCostUi;
+    const readReveals = 1 + voidCrownExtraHonestReveals(run);
+    const readLabel = state.readUsesRemaining <= 0
+      ? "STUDY - out of uses this run"
+      : `STUDY (${state.readUsesRemaining} left) - ${readCostUi}e, reveal ${readReveals} honest`;
     const actionsBlock = state.ended ? "" : (state.pendingAction ? confirmBar : `
       <div class="b-acts-row">
         ${action("SLASH", "SLASH", S.slash_dmg, "COUNTER")}
@@ -333,11 +1118,89 @@ export function battleScene(root, opts) {
         ${action("COUNTER", "COUNTER", S.counter_win_dmg, "GUARD")}
       </div>
       <button class="b-wild ${canWild ? "" : "b-wild--off"}" data-action="action" data-act="WILD" ${canWild ? "" : "disabled"}>
-        WILD STRIKE - <strong>${S.ws_dmg} dmg</strong>, ignores RPS - ${S.ws_cost}e
+        WILD STRIKE - <strong>${S.ws_dmg} dmg</strong>, ignores RPS, -50% taken - ${S.ws_cost}e
+      </button>
+      <button class="b-read ${canRead ? "" : "b-read--off"}" data-action="action" data-act="READ" ${canRead ? "" : "disabled"}>
+        \u{1F441} ${readLabel}
       </button>`);
 
+    const lowHpClass = state.player.hp > 0 && state.player.hp < state.player.maxHp * 0.25 ? "b-bar__fill--critical" : "";
+    const enemyDyingClass = state.ended === "win" ? "b-sprite--dying" : "";
+    const playerDyingClass = state.ended === "lose" ? "b-sprite--dying" : "";
+    // Axe Berserk: while buff active, idle pose = ultimate (fire/bara look)
+    const playerIdleSprite = (weapon.id === "axe" && state.player.berserkTurns > 0)
+      ? "axe_ultimate"
+      : `${weapon.id}_idle`;
+
+    // 2.7e P1: footer relics row -- render owned relics with tier-coded chips.
+    // Tap a chip -> tooltip with name + description. Empty slots stay dashed.
+    const ownedRelicIds = run.relics || [];
+    const _allRelicDefs = [
+      ...(relicsData.commons || []),
+      ...(relicsData.rares   || []),
+      ...(relicsData.epics   || []),
+      ...(relicsData.special || []),
+    ];
+    const _relicMap = {};
+    _allRelicDefs.forEach((r) => { _relicMap[r.id] = r; });
+    const _escHtml = (s) => String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const _relicEmoji = (r) => {
+      // Quick visual differentiator per tier when we have no sprite.
+      if (!r) return "\u25c6";
+      if (r.tier === "epic")    return "\u2728"; // sparkles
+      if (r.tier === "rare")    return "\u2734\ufe0f"; // 4-point star
+      if (r.tier === "special") return "\u{1F48E}"; // gem
+      return "\u25c6"; // diamond
+    };
+    const _slotsToShow = Math.max(5, ownedRelicIds.length);
+    let _relicChips = "";
+    for (let i = 0; i < _slotsToShow; i++) {
+      const rid = ownedRelicIds[i];
+      if (!rid) {
+        _relicChips += `<div class="b-relics__slot b-relics__slot--empty"></div>`;
+        continue;
+      }
+      const r = _relicMap[rid];
+      const tier = r?.tier || "common";
+      const name = _escHtml(r?.name || rid);
+      _relicChips += `<button class="b-relics__slot b-relics__slot--owned b-relics__slot--${tier}" data-action="relic-show" data-rid="${rid}" aria-label="${name}" title="${name}">${_relicEmoji(r)}</button>`;
+    }
+    const relicsRowHtml = `
+      <div class="b-relics">
+        <span class="b-relics__label">RELICS:</span>
+        <div class="b-relics__row">${_relicChips}</div>
+      </div>`;
+
+    // 2.7e P1: relic tooltip modal -- shown when state.showRelicId is set.
+    let relicTooltip = "";
+    if (state.showRelicId) {
+      const r = _relicMap[state.showRelicId];
+      if (r) {
+        const tier = r.tier || "common";
+        const tierLabel = tier.toUpperCase();
+        relicTooltip = `
+        <div class="b-modal-bg" data-action="relic-close">
+          <div class="b-modal b-modal--tooltip b-modal--tier-${tier}" data-action="relic-stop">
+            <div class="b-modal__tooltip-head">
+              <span class="b-modal__tooltip-icon">${_relicEmoji(r)}</span>
+              <div>
+                <div class="b-modal__title">${_escHtml(r.name)}</div>
+                <div class="b-modal__tooltip-tier">${tierLabel} RELIC</div>
+              </div>
+            </div>
+            <div class="b-modal__body">
+              <div class="b-modal__tooltip-desc">${_escHtml(r.description || "")}</div>
+            </div>
+            <div class="b-modal__actions">
+              <button class="btn btn--primary" data-action="relic-close">CLOSE</button>
+            </div>
+          </div>
+        </div>`;
+      }
+    }
+
     root.innerHTML = `
-      <div class="b-screen">
+      <div class="b-screen" style="background-image:url('/assets/${bgImg}')">
         <div class="b-header">
           <button class="b-icon-btn" data-action="settings">SET</button>
           <div class="b-stage">${state.chapter} - FLOOR ${state.floor}/${state.floorMax}</div>
@@ -345,22 +1208,26 @@ export function battleScene(root, opts) {
         </div>
         <div class="b-zone">
           <div class="b-side b-side--player">
-            <div class="b-side__label">YOU</div>
-            <div class="b-bar"><div class="b-bar__fill b-bar__fill--hp" style="width:${pHpPct}%"></div><span class="b-bar__text">HP ${state.player.hp}/${state.player.maxHp}</span></div>
-            <div class="b-bar"><div class="b-bar__fill b-bar__fill--eng" style="width:${pEngPct}%"></div><span class="b-bar__text">ENG ${state.player.energy}/${state.player.maxEnergy}</span></div>
-            <div class="b-buffs">BUFFS: ${playerBuffsHtml}</div>
-            <div class="b-sprite" style="background-image:url('/assets/${weapon.id}_idle.png')"></div>
+            <div class="b-side__info">
+              <div class="b-side__label">YOU</div>
+              <div class="b-bar"><div class="b-bar__fill b-bar__fill--hp ${lowHpClass}" style="width:${pHpPct}%"></div><span class="b-bar__text">HP ${state.player.hp}/${state.player.maxHp}</span></div>
+              <div class="b-bar"><div class="b-bar__fill b-bar__fill--eng" style="width:${pEngPct}%"></div><span class="b-bar__text">ENG ${state.player.energy}/${state.player.maxEnergy}</span></div>
+              <div class="b-buffs">BUFFS: ${playerBuffsHtml}</div>
+            </div>
+            <div class="b-sprite ${playerDyingClass}" style="background-image:url('/assets/${playerIdleSprite}.png')"></div>
           </div>
           <div class="b-side b-side--enemy">
-            <div class="b-side__label">${enemyDef.name.toUpperCase()}</div>
-            <div class="b-bar"><div class="b-bar__fill b-bar__fill--enemyhp" style="width:${eHpPct}%"></div><span class="b-bar__text">HP ${state.enemy.hp}/${state.enemy.maxHp}</span></div>
-            <div class="b-intent">INTENT: ${intentIcon} ${intent}${idmg ? ` <strong>${idmg}</strong>` : ""}</div>
-            ${foresightHtml}
-            <div class="b-buffs">BUFFS: ${enemyBuffsHtml}</div>
-            <div class="b-sprite" style="background-image:url('/assets/${spriteId}.png')"></div>
+            <div class="b-side__info">
+              <div class="b-side__label">${enemyDef.name.toUpperCase()}</div>
+              <div class="b-bar"><div class="b-bar__fill b-bar__fill--enemyhp" style="width:${eHpPct}%"></div><span class="b-bar__text">${hasTorch(run) ? `HP ${state.enemy.hp}/${state.enemy.maxHp}` : `HP ${Math.max(0, Math.ceil(eHpPct))}%`}</span></div>
+              <div class="b-intent ${state.warCryThisTurn ? "b-intent--warcry" : ""} ${state.enragedThisTurn ? "b-intent--enraged" : ""}">${intentHtml}</div>
+              ${foresightHtml}
+              <div class="b-buffs">BUFFS: ${enemyBuffsHtml}</div>
+            </div>
+            <div class="b-sprite ${enemyDyingClass}" style="background-image:url('/assets/${spriteId}.png')"></div>
           </div>
         </div>
-        <div class="b-mid">
+        <div class="b-mid b-mid--2col">
           <div class="b-card">
             <div class="b-card__title">${weapon.name.toUpperCase()}</div>
             <div class="b-card__small"><strong>${weapon.passive.name}</strong></div>
@@ -370,26 +1237,82 @@ export function battleScene(root, opts) {
           <button class="b-card b-card--ult ${canUlt ? "b-card--ready" : ""}" data-action="ult" ${!canUlt ? "disabled" : ""}>
             <div class="b-card__title">${weapon.ultimate.name.toUpperCase()}</div>
             <div class="b-bar b-bar--ult"><div class="b-bar__fill b-bar__fill--ult" style="width:${ultPct}%"></div><span class="b-bar__text">${state.player.energy}/${ultCost}</span></div>
-            <div class="b-card__small">${canUlt ? "TAP TO USE" : weapon.ultimate.description.slice(0, 38)}</div>
+            <div class="b-card__small">${canUlt ? "TAP TO USE" : weapon.ultimate.description}</div>
           </button>
-          <div class="b-card">
-            <div class="b-card__title">ROUND ${state.turn}</div>
-            <div class="b-card__log">${logHtml}</div>
-          </div>
+        </div>
+        <div class="b-battlelog">
+          <div class="b-battlelog__title">BATTLE LOG &middot; ROUND ${state.turn}</div>
+          <div class="b-battlelog__lines">${logHtml || '<div class="b-battlelog__empty">No actions yet</div>'}</div>
         </div>
         <div class="b-prompt">CHOOSE YOUR MOVE</div>
         ${actionsBlock}
         ${state.ended ? "" : `<button class="b-surrender" data-action="flee">SURRENDER</button>`}
-        <div class="b-relics">
-          <span class="b-relics__label">RELICS:</span>
-          <div class="b-relics__slot"></div>
-          <div class="b-relics__slot"></div>
-          <div class="b-relics__slot"></div>
-          <div class="b-relics__slot"></div>
-          <div class="b-relics__slot"></div>
-        </div>
+        ${relicsRowHtml}
         ${endOverlay}
+        ${surrenderModal}
+        ${runInfoModal}
+        ${relicTooltip}
       </div>`;
+    // After first render that included end overlay, suppress entry animation
+    // on subsequent re-renders (relic tap, etc.) so it doesn't flash.
+    if (state.ended) endOverlayShown = true;
+  };
+
+  const swapSprite = (sel, newUrl, ms = 1800) => {
+    const el = root.querySelector(sel);
+    if (!el) return;
+    const orig = el.style.backgroundImage;
+    el.style.backgroundImage = `url('${newUrl}')`;
+    setTimeout(() => {
+      // only revert if same element still in DOM
+      if (el.isConnected) el.style.backgroundImage = orig;
+    }, ms);
+  };
+
+  const flushSpriteSwaps = () => {
+    if (state.lastAction) {
+      const map = { SLASH: "slash", GUARD: "guard", COUNTER: "counter", WILD: "slash", ULT: "ultimate" };
+      const variant = map[state.lastAction] || "idle";
+      swapSprite(".b-side--player .b-sprite", `/assets/${weapon.id}_${variant}.png`);
+      state.lastAction = null;
+    }
+    if (state.enemyAttacked) {
+      swapSprite(".b-side--enemy .b-sprite", `/assets/${spriteId}_attack.png`);
+      state.enemyAttacked = false;
+    }
+  };
+
+  const flushAnims = () => {
+    const screen = root.querySelector(".b-screen");
+    anims.forEach((a) => {
+      if (a.kind === "shake" && screen) {
+        const cls = `b-screen--shake-${a.level}`;
+        screen.classList.remove(cls);
+        // force reflow so animation restarts
+        void screen.offsetWidth;
+        screen.classList.add(cls);
+        setTimeout(() => screen.classList.remove(cls), 400);
+      } else if (a.kind === "flash") {
+        const sprite = root.querySelector(`.b-side--${a.target} .b-sprite`);
+        if (!sprite) return;
+        sprite.classList.add("b-sprite--hit");
+        setTimeout(() => sprite.classList.remove("b-sprite--hit"), 200);
+      } else if (a.kind === "bump") {
+        const sprite = root.querySelector(`.b-side--${a.target} .b-sprite`);
+        if (!sprite) return;
+        sprite.classList.add("b-sprite--bump");
+        setTimeout(() => sprite.classList.remove("b-sprite--bump"), 280);
+      } else if (a.kind === "float") {
+        const sprite = root.querySelector(`.b-side--${a.target} .b-sprite`);
+        if (!sprite) return;
+        const el = document.createElement("div");
+        el.className = `b-floater b-floater--${a.type}`;
+        el.textContent = a.type === "heal" ? `+${a.value}` : (a.type === "crit" ? `* ${a.value} *` : `${a.value}`);
+        sprite.appendChild(el);
+        el.addEventListener("animationend", () => el.remove());
+      }
+    });
+    anims.length = 0;
   };
 
   const onClick = (e) => {
@@ -397,13 +1320,61 @@ export function battleScene(root, opts) {
     if (!t) return;
     const action = t.dataset.action;
     if (action === "flee") {
-      if (confirm("Surrender this battle?")) mountScene("lobby", root);
+      state.showSurrenderConfirm = true;
+      render();
+    } else if (action === "surrender-cancel") {
+      state.showSurrenderConfirm = false;
+      render();
+    } else if (action === "surrender-yes") {
+      mountScene("lobby", root);
     } else if (action === "end-back") {
       mountScene("lobby", root);
+    } else if (action === "select-relic") {
+      state.pendingRelicId = t.dataset.relic || null;
+      render();
+    } else if (action === "confirm-relic") {
+      if (!state.pendingRelicId) return;
+      applyRewardAndAdvance(state.pendingRelicId);
+    } else if (action === "skip-relic") {
+      applyRewardAndAdvance(null);
+    } else if (action === "boss-take") {
+      applyBossReward(true);
+    } else if (action === "boss-skip") {
+      applyBossReward(false);
+    } else if (action === "boss-finish") {
+      // CH1 demo/chapter complete -- discard run, return to lobby.
+      setState({ run: null });
+      mountScene("lobby", root);
+    } else if (action === "runinfo") {
+      state.showRunInfo = true;
+      render();
+      return;
+    } else if (action === "runinfo-close") {
+      // 2.7d stepA: backdrop or CLOSE button -> dismiss. Inner modal swallows via runinfo-stop.
+      state.showRunInfo = false;
+      render();
+      return;
+    } else if (action === "runinfo-stop") {
+      // 2.7d stepA: noop -- prevents inner modal clicks from bubbling to backdrop close.
+      return;
+    } else if (action === "relic-show") {
+      // 2.7e P1: tap a relic chip in the footer row -> show its tooltip modal.
+      const rid = t.dataset.rid;
+      if (rid) {
+        state.showRelicId = rid;
+        render();
+      }
+      return;
+    } else if (action === "relic-close") {
+      // 2.7e P1: backdrop tap or CLOSE button -> dismiss tooltip.
+      state.showRelicId = null;
+      render();
+      return;
+    } else if (action === "relic-stop") {
+      // 2.7e P1: inner panel tap -- noop, just stops backdrop close from firing.
+      return;
     } else if (action === "settings") {
       alert("Settings coming Step 2.10");
-    } else if (action === "runinfo") {
-      alert(`RUN INFO\n\nMode: ${run.mode}\nWeapon: ${weapon.name}\nFloor: ${state.floor}/${state.floorMax}\nGold + Relics: Step 2.7`);
     } else if (action === "ult") {
       if (state.ended) return;
       state.pendingAction = "ULT";
@@ -420,12 +1391,22 @@ export function battleScene(root, opts) {
       state.pendingAction = null;
       resolve(act);
       render();
+      flushAnims();
+      flushSpriteSwaps();
     }
   };
   root.addEventListener("click", onClick);
   render();
+  flushAnims();
   return () => {
     root.removeEventListener("click", onClick);
-    delete window.cheat;
+    // 2.7c-2: only strip battle-scoped keys; keep global cheat alive across scenes.
+    if (window.cheat) {
+      delete window.cheat.energy;
+      delete window.cheat.enemyHp;
+      delete window.cheat.playerHp;
+      delete window.cheat.win;
+      delete window.cheat.lose;
+    }
   };
 }

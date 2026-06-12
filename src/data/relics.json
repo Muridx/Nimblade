@@ -23,11 +23,11 @@
     { "id": "gamblers_dice",    "name": "Gamblers Dice",    "tier": "rare", "subtier": "risk_reward",  "weight": 3, "effect_id": "gamblers_dice",    "description": "+30 energy each battle start, BUT -10 max HP for run." },
     { "id": "iron_will",        "name": "Iron Will",        "tier": "rare", "subtier": "boss_tool",    "weight": 3, "effect_id": "iron_will",        "description": "1x/battle: ignore one boss SCHEME (treat as honest)." },
     { "id": "chained_grimoire", "name": "Chained Grimoire", "tier": "rare", "subtier": "counter_build","weight": 3, "effect_id": "chained_grimoire", "description": "COUNTER dmg +6, BUT lose 5 energy per turn." },
-    { "id": "runic_compass",    "name": "Runic Compass",    "tier": "rare", "subtier": "scouting",     "weight": 3, "effect_id": "runic_compass",    "description": "Reveal next 2 floor node types on map." },
+    { "id": "runic_compass",    "name": "Runic Compass",    "tier": "rare", "subtier": "scouting",     "weight": 3, "effect_id": "runic_compass",    "description": "Reveal next 2 floor node types on map. (map UI soon)" },
     { "id": "holy_water",       "name": "Holy Water",       "tier": "rare", "subtier": "anti_heal",    "weight": 1, "effect_id": "holy_water",       "description": "1x/battle: disable monster healing for 3 turns." }
   ],
   "epics": [
-    { "id": "pact_of_shadows",   "name": "Pact of Shadows",   "tier": "epic", "subtier": "deal_with_devil", "weight": 3, "effect_id": "pact_of_shadows",   "description": "+30 max HP for run, BUT -2 self-dmg per SLASH win." },
+    { "id": "devils_bargain",    "name": "Devil's Bargain",   "tier": "epic", "subtier": "deal_with_devil", "weight": 3, "effect_id": "devils_bargain",    "description": "+30 max HP for run, BUT -2 self-dmg per SLASH win." },
     { "id": "echo_stone",        "name": "Echo Stone",        "tier": "epic", "subtier": "momentum_chain",  "weight": 3, "effect_id": "echo_stone",        "description": "Win RPS with same basic action 2+ turns in a row -> +25% dmg. Resets on action change, RPS loss, or draw. Basic RPS only." },
     { "id": "serpent_belt",      "name": "Serpent Belt",      "tier": "epic", "subtier": "rhythm",          "weight": 3, "effect_id": "serpent_belt",      "description": "Every 5th turn: take 0 dmg AND deal 2x dmg." },
     { "id": "golden_chalice",    "name": "Golden Chalice",    "tier": "epic", "subtier": "high_risk_eco",   "weight": 3, "effect_id": "golden_chalice",    "description": "Start each battle at 50% HP cap, BUT double gold from all sources." },

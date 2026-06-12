@@ -61,7 +61,7 @@ export function weaponSelectScene(root) {
     } else if (action === "begin") {
       setState({ run: { ...getState().run, weapon: selected } });
       console.log(`[run] start mode=${run.mode} weapon=${selected}`);
-      mountScene("battle", root);
+      mountScene("map", root);
     }
   };
 
