@@ -84,6 +84,10 @@ function defaultMeta() {
     forge: emptyForge(),
     ascension: 0,
     ch1Cleared: false,
+    // P4: list of weapon ids the player has permanently unlocked. Sword is
+    // the free starter. Others (axe/spear/staff) get added here when the
+    // player pays the shard cost in Weapon Select.
+    weaponsUnlocked: ["sword"],
   };
 }
 
@@ -106,6 +110,13 @@ function loadMeta() {
     merged.ascension = Math.max(0, Math.min(5, Number(merged.ascension) || 0));
     merged.shards = Math.max(0, Math.floor(Number(merged.shards) || 0));
     merged.ch1Cleared = Boolean(merged.ch1Cleared);
+    // P4: ensure weaponsUnlocked is a clean array w/ sword guaranteed.
+    // Old saves (pre-P4) won't have this field -- default to sword only.
+    const allowedWeapons = ["sword", "spear", "axe", "staff"];
+    const rawList = Array.isArray(parsed.weaponsUnlocked) ? parsed.weaponsUnlocked : ["sword"];
+    const cleaned = rawList.filter((w) => allowedWeapons.includes(w));
+    if (!cleaned.includes("sword")) cleaned.unshift("sword");
+    merged.weaponsUnlocked = [...new Set(cleaned)];
     return merged;
   } catch (err) {
     console.warn("[store] meta load failed, using default:", err);

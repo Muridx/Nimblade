@@ -44,71 +44,182 @@ body {
 }
 @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
 
-/* ===== LOBBY ===== */
+/* ===== LOBBY V3 (P3a premium redesign) =====
+ * Layout: absolute-positioned 4-zone scaffold (top bar / title block /
+ * menu grid / CTA stack) over bg_lobby.png. All zones use glassmorphism
+ * (blur + thin gold border + inset highlights). Mobile-first 360px.
+ */
 .lobby {
   position: relative; width: 100%; height: 100%;
   background-image: url("/assets/bg_lobby.png");
   background-size: cover; background-position: center;
-  display: flex; flex-direction: column; align-items: center;
-  /* M3: extra top padding so header chips don't overlap the NIMBLADE title on small screens. */
-  padding: 76px 20px 6vh;
+  overflow: hidden;
 }
-/* M3: top header row -- left cluster (shards/forge/asc chips) + right wallet button. */
-.lobby__header {
-  position: absolute; top: 12px; left: 12px; right: 12px;
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 8px; z-index: 5;
+/* Vignette: radial focus + top/bottom darken so UI sits on a calm field. */
+.lobby::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 35%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.55) 100%),
+    linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0) 22%, rgba(0,0,0,0) 70%, rgba(0,0,0,0.50));
+  z-index: 1;
 }
-.lobby__header-left { display: flex; gap: 8px; flex-wrap: wrap; }
-.lobby__chip {
-  min-height: 44px; /* mobile tap target */
-  padding: 8px 14px;
-  background: rgba(0,0,0,0.55);
-  border: 1px solid rgba(255,255,255,0.18); border-radius: 22px;
-  color: var(--fg); font-family: inherit;
-  font-size: 13px; font-weight: 700; letter-spacing: 0.06em;
-  cursor: pointer; backdrop-filter: blur(8px);
-  display: inline-flex; align-items: center; gap: 6px;
-  transition: background 0.15s, transform 0.05s;
+
+/* ----- TOP BAR: SHARDS pill (left) + WALLET pill (right) ----- */
+.lobby__top {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+  padding: 14px 14px 0;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
 }
-.lobby__chip:active { transform: scale(0.96); }
-.lobby__chip:hover { background: rgba(0,0,0,0.8); }
-.lobby__chip-icon { font-size: 16px; }
-.lobby__chip-val { font-weight: 900; }
-/* Shards chip: cool cyan glow -- ties to b-end__shards color. */
-.lobby__chip--shards {
-  border-color: rgba(140,190,255,0.45);
-  color: #d8eaff;
-  background: rgba(40,70,140,0.35);
-  box-shadow: 0 0 14px rgba(120,180,255,0.25);
+.lobby__shards {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 8px 16px 8px 12px; min-height: 44px;
+  background: linear-gradient(180deg, rgba(70,52,18,0.72), rgba(32,22,8,0.72));
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,204,85,0.55); border-radius: 999px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.15),
+    inset 0 -2px 0 rgba(0,0,0,0.25),
+    0 4px 12px rgba(0,0,0,0.5);
+  color: #f1e6c8; cursor: pointer; user-select: none;
+  transition: transform 0.08s;
 }
-/* FORGE chip: warm forge-glow gold. */
-.lobby__chip--forge {
-  border-color: rgba(212,166,87,0.5);
-  color: var(--gold);
-  background: rgba(80,50,20,0.35);
+.lobby__shards:active { transform: scale(0.97); }
+.lobby__shards-icon {
+  font-size: 18px;
+  filter: drop-shadow(0 0 6px rgba(120,200,255,0.55));
 }
-/* Ascension chip: dim until unlocked. */
-.lobby__chip--asc {
-  border-color: rgba(255,180,90,0.4);
-  color: #ffd9a0;
-  background: rgba(80,40,10,0.4);
+.lobby__shards-text { display: flex; flex-direction: column; line-height: 1; }
+.lobby__shards-val {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 18px; font-weight: 900; letter-spacing: 0.02em;
+  color: #ffe39a;
 }
-.lobby__chip--locked {
-  opacity: 0.55;
-  filter: grayscale(0.5);
+.lobby__shards-label {
+  font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: rgba(241,230,200,0.6); margin-top: 2px;
 }
+
 .lobby__wallet {
-  min-height: 44px;
-  padding: 8px 16px;
-  background: rgba(0,0,0,0.55);
-  border: 1px solid rgba(255,255,255,0.18); border-radius: 22px;
-  color: var(--fg); font-family: inherit;
-  font-size: 13px; font-weight: 600; letter-spacing: 0.05em;
-  cursor: pointer; backdrop-filter: blur(8px);
-  display: inline-flex; align-items: center;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 14px; min-height: 44px;
+  background: rgba(20,14,8,0.6);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,204,85,0.35); border-radius: 999px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 4px 12px rgba(0,0,0,0.5);
+  color: #f1e6c8; font-family: inherit;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+  cursor: pointer; transition: transform 0.08s;
 }
-.lobby__wallet:hover { background: rgba(0,0,0,0.8); }
+.lobby__wallet:active { transform: scale(0.97); }
+.lobby__wallet:hover { background: rgba(20,14,8,0.75); }
+.lobby__wallet-icon { font-size: 16px; }
+
+/* ----- TITLE BLOCK: PNG logo + tagline ----- */
+.lobby__titleblock {
+  position: absolute; top: 78px; left: 0; right: 0; z-index: 4;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  pointer-events: none;
+}
+.lobby__logo {
+  width: 300px; height: 110px;
+  background: url("/assets/logo_nimblade.png") center/contain no-repeat;
+  filter:
+    drop-shadow(0 0 22px rgba(255,204,85,0.65))
+    drop-shadow(0 6px 14px rgba(0,0,0,0.75));
+}
+.lobby__tagline {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px; font-weight: 600;
+  letter-spacing: 0.38em; text-transform: uppercase;
+  color: rgba(241,230,200,0.82);
+  text-shadow:
+    0 1px 6px rgba(0,0,0,0.8),
+    0 0 12px rgba(255,204,85,0.18);
+}
+
+/* ----- 2x2 MENU GRID: FORGE / ASCENSION / LEADERBOARD / SETTINGS ----- */
+.lobby__menu {
+  position: absolute; left: 16px; right: 16px; bottom: 220px; z-index: 5;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.lobby__card {
+  position: relative;
+  padding: 16px 14px 14px; min-height: 96px;
+  background: linear-gradient(180deg, rgba(40,28,14,0.72), rgba(20,12,6,0.72));
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,204,85,0.32);
+  border-radius: 16px;
+  text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    inset 0 -2px 0 rgba(0,0,0,0.30),
+    0 6px 14px rgba(0,0,0,0.45);
+  cursor: pointer; user-select: none;
+  transition: transform 0.08s, border-color 0.2s, background 0.2s;
+}
+.lobby__card:active { transform: scale(0.97); }
+.lobby__card-icon {
+  font-size: 24px; line-height: 1;
+  filter: drop-shadow(0 0 8px rgba(255,204,85,0.35));
+}
+.lobby__card-label {
+  font-size: 12px; font-weight: 800; letter-spacing: 0.18em;
+  color: #f1e6c8;
+}
+.lobby__card-sub {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+  color: rgba(241,230,200,0.55);
+}
+/* Accent: ASCENSION when tier >= 1 -- brighter gold border + gold sub-text. */
+.lobby__card--accent { border-color: rgba(255,204,85,0.55); }
+.lobby__card--accent .lobby__card-sub { color: #ffd97a; font-weight: 800; }
+/* Locked: ASCENSION before ch1 cleared -- dim everything. */
+.lobby__card--locked { opacity: 0.55; }
+.lobby__card--locked .lobby__card-sub { color: rgba(241,230,200,0.45); }
+
+/* ----- CTA STACK: START RUN + TRY DEMO + hint ----- */
+.lobby__cta {
+  position: absolute; left: 16px; right: 16px; bottom: 22px; z-index: 5;
+  display: flex; flex-direction: column; gap: 10px;
+}
+/* Premium gold START RUN -- triple gradient + double inset + outer glow. */
+.lobby__btn-start {
+  background: linear-gradient(180deg, #ffe39a 0%, #ffc15a 50%, #b27018 100%);
+  color: #2a1a06;
+  border: 1px solid rgba(255,230,170,0.6);
+  border-radius: 16px;
+  padding: 18px;
+  font-size: 18px; font-weight: 900; letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.35), 0 -1px 0 rgba(90,50,0,0.35);
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,0.55),
+    inset 0 -3px 0 rgba(90,50,0,0.45),
+    0 8px 22px rgba(0,0,0,0.55),
+    0 0 28px rgba(255,204,85,0.30);
+}
+.lobby__btn-start:hover { transform: translateY(-1px); }
+.lobby__btn-start:active { transform: scale(0.97); }
+/* Ghost-glass TRY DEMO -- secondary weight. */
+.lobby__btn-demo {
+  background: rgba(20,14,8,0.6);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,204,85,0.35);
+  border-radius: 16px;
+  color: #f1e6c8;
+  padding: 14px;
+  font-size: 14px; font-weight: 800; letter-spacing: 0.16em;
+  text-transform: uppercase;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    0 4px 12px rgba(0,0,0,0.45);
+}
+.lobby__btn-demo:hover { background: rgba(20,14,8,0.75); }
+.lobby__btn-demo:active { transform: scale(0.97); }
 
 /* M3: stub toast for FORGE / ASCENSION chip clicks until M4 / M6 land. */
 .lobby__toast {
@@ -315,7 +426,14 @@ body {
   display: flex; flex-direction: column; gap: 6px;
   color: #eee;
   min-height: 60px;
+  height: auto;
+  width: 100%;
+  flex: 0 0 auto;
+  flex-shrink: 0;
   font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  overflow: visible;
   transition: border-color 0.15s, background 0.15s;
 }
 .asc__row:hover { border-color: rgba(255,200,120,0.4); }
@@ -355,15 +473,16 @@ body {
 .asc__confirm { min-height: 48px; font-weight: 900; letter-spacing: 0.05em; }
 .asc__confirm[disabled] { opacity: 0.5; cursor: not-allowed; }
 
-.lobby__title {
-  font-size: clamp(32px, 8vw, 56px); font-weight: 900; letter-spacing: 0.15em;
-  color: var(--gold);
-  text-shadow: 0 4px 24px rgba(0,0,0,0.95), 0 0 12px rgba(212,166,87,0.4);
-  margin-top: 16px;
+/* P3a: .lobby__title / .lobby__spacer / .lobby__actions classes from M3 are
+ * no longer emitted by render() -- left removed. .lobby__hint is the demo
+ * footnote inside .lobby__cta. */
+.lobby__hint {
+  margin: 2px 0 0;
+  font-size: 11px; font-style: italic;
+  color: rgba(241,230,200,0.55);
+  text-align: center;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.9);
 }
-.lobby__spacer { flex: 1; }
-.lobby__actions { width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 14px; }
-.lobby__hint { margin-top: 4px; font-size: 12px; color: var(--muted); text-align: center; text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
 
 /* ===== BUTTONS ===== */
 .btn {
@@ -2119,4 +2238,414 @@ body {
   text-align: center;
   font-style: italic;
   line-height: 1.4;
+}
+
+/* ===========================================================================
+   P3b: DAILY LOGIN -- top-bar gift pill + 7-day claim modal
+   =========================================================================== */
+
+/* Top-right group: daily pill + wallet pill share a flex row. */
+.lobby__top-right {
+  display: inline-flex; align-items: center; gap: 8px;
+}
+
+/* Small circular gift pill next to wallet. Shown only when wallet connected. */
+.lobby__daily {
+  position: relative;
+  width: 44px; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(20,14,8,0.6);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,204,85,0.35); border-radius: 999px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 4px 12px rgba(0,0,0,0.5);
+  color: #f1e6c8;
+  cursor: pointer; user-select: none;
+  transition: transform 0.08s, border-color 0.2s, box-shadow 0.2s;
+}
+.lobby__daily:active { transform: scale(0.92); }
+.lobby__daily-icon {
+  font-size: 20px; line-height: 1;
+  filter: drop-shadow(0 0 4px rgba(255,204,85,0.5));
+}
+/* Ready state: brighter border + outer gold glow pulse so player notices. */
+.lobby__daily--ready {
+  border-color: rgba(255,204,85,0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    0 0 16px rgba(255,204,85,0.55),
+    0 4px 12px rgba(0,0,0,0.5);
+  animation: dailyPulse 2.4s ease-in-out infinite;
+}
+@keyframes dailyPulse {
+  0%,100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 0 12px rgba(255,204,85,0.40), 0 4px 12px rgba(0,0,0,0.5); }
+  50%     { box-shadow: inset 0 1px 0 rgba(255,255,255,0.20), 0 0 22px rgba(255,204,85,0.75), 0 4px 14px rgba(0,0,0,0.5); }
+}
+/* Red "!" badge dot at top-right of the pill. */
+.lobby__daily-badge {
+  position: absolute; top: -2px; right: -2px;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #d94a3a;
+  border: 2px solid #1a0e06;
+  border-radius: 999px;
+  color: #fff; font-size: 11px; font-weight: 900; line-height: 1;
+  box-shadow: 0 2px 6px rgba(217,74,58,0.5);
+}
+
+/* ===== Daily Login modal (reuses forge__overlay + forge__card scaffold) ===== */
+.daily__card {
+  max-width: 480px; width: 100%;
+  max-height: 88vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+/* Streak strip below header. */
+.daily__streak {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, rgba(80,28,14,0.55), rgba(40,16,8,0.55));
+  border: 1px solid rgba(255,140,80,0.45);
+  border-radius: 12px;
+  color: #ffd9b0;
+}
+.daily__streak--zero {
+  background: linear-gradient(180deg, rgba(40,40,40,0.55), rgba(20,20,20,0.55));
+  border-color: rgba(255,255,255,0.18);
+  color: #ccc;
+}
+.daily__streak-icon { font-size: 20px; filter: drop-shadow(0 0 6px rgba(255,100,40,0.6)); flex: 0 0 auto; }
+.daily__streak-text { font-weight: 900; font-size: 14px; letter-spacing: 0.06em; flex: 1; }
+.daily__streak-total { font-size: 11px; color: rgba(255,217,176,0.7); letter-spacing: 0.04em; flex: 0 0 auto; }
+
+/* 7-day grid: 2 rows of 4 columns on narrow phones (last cell empty looks
+ * weird, so we use 4 cols x 2 rows but only 7 cells -- cell 8 slot stays
+ * empty; OR 7 cols inline). Use 7-col flex with wrap so it lays out
+ * comfortably. We let it be a horizontal scroller if it overflows. */
+.daily__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.daily__day {
+  position: relative;
+  padding: 8px 4px 8px;
+  background: rgba(30,22,12,0.6);
+  border: 1px solid rgba(255,204,85,0.20);
+  border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  text-align: center;
+  min-height: 76px;
+}
+.daily__day-label {
+  font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
+  color: rgba(241,230,200,0.55);
+  text-transform: uppercase;
+}
+.daily__day-reward {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px; font-weight: 900; color: #ffe39a;
+  display: inline-flex; align-items: baseline; gap: 1px; line-height: 1;
+}
+.daily__gem { font-size: 10px; }
+.daily__day-state {
+  font-size: 14px; line-height: 1;
+  margin-top: auto;
+}
+/* Claimed: green tint, dimmed reward number. */
+.daily__day--claimed {
+  background: rgba(20,40,20,0.55);
+  border-color: rgba(120,200,120,0.4);
+  opacity: 0.85;
+}
+.daily__day--claimed .daily__day-reward { color: rgba(255,227,154,0.55); }
+/* TODAY: bright gold border + scale pop. */
+.daily__day--today {
+  background: linear-gradient(180deg, rgba(120,80,20,0.7), rgba(60,40,10,0.7));
+  border-color: #ffc15a;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    0 0 14px rgba(255,193,90,0.55);
+  transform: scale(1.04);
+}
+.daily__day--today .daily__day-reward { color: #fff3c8; font-size: 18px; }
+/* Day 7 jackpot: subtle purple shimmer to hint it's the prize. */
+.daily__day--jackpot {
+  border-color: rgba(255,204,85,0.5);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 10px rgba(180,120,255,0.25);
+}
+.daily__day--jackpot.daily__day--claimed { box-shadow: none; }
+.daily__day--jackpot.daily__day--today {
+  border-color: #ffd97a;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    0 0 18px rgba(255,193,90,0.7),
+    0 0 8px rgba(180,120,255,0.4);
+}
+
+/* Big claim button + status line. */
+.daily__claim {
+  width: 100%;
+  background: linear-gradient(180deg, #ffe39a 0%, #ffc15a 50%, #b27018 100%);
+  color: #2a1a06;
+  border: 1px solid rgba(255,230,170,0.6);
+  border-radius: 14px;
+  padding: 16px;
+  font-size: 16px; font-weight: 900; letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,0.55),
+    inset 0 -3px 0 rgba(90,50,0,0.45),
+    0 6px 18px rgba(0,0,0,0.45),
+    0 0 22px rgba(255,204,85,0.30);
+  cursor: pointer;
+  transition: transform 0.08s;
+}
+.daily__claim:active { transform: scale(0.97); }
+.daily__claim:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+.daily__claim--loading { opacity: 0.7; }
+
+.daily__status-line {
+  text-align: center; font-size: 12px;
+  color: rgba(241,230,200,0.65); letter-spacing: 0.04em;
+  margin-top: -4px;
+}
+
+/* "Already claimed today" state. */
+.daily__done {
+  padding: 12px 14px;
+  background: rgba(20,40,20,0.55);
+  border: 1px solid rgba(120,200,120,0.4);
+  border-radius: 12px;
+  text-align: center;
+}
+.daily__done-title {
+  font-size: 14px; font-weight: 900; letter-spacing: 0.06em;
+  color: #b6f0a8;
+}
+.daily__done-sub {
+  margin-top: 4px;
+  font-size: 12px; color: rgba(241,230,200,0.65);
+}
+
+/* Connect-wallet fallback inside modal. */
+.daily__nowallet {
+  display: flex; flex-direction: column; gap: 10px; align-items: stretch;
+  padding: 14px;
+  background: rgba(30,22,12,0.6);
+  border: 1px solid rgba(255,204,85,0.25);
+  border-radius: 12px;
+  text-align: center;
+}
+.daily__nowallet-text {
+  font-size: 13px; color: rgba(241,230,200,0.75);
+}
+.daily__connect { padding: 12px; }
+
+/* Celebration line after a successful claim. */
+.daily__celebrate {
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(80,52,14,0.7), rgba(40,26,8,0.7));
+  border: 1px solid #ffc15a;
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 18px rgba(255,193,90,0.30);
+  animation: dailyCelebrate 0.35s ease-out;
+}
+.daily__celebrate--info {
+  background: rgba(40,40,40,0.55);
+  border-color: rgba(255,255,255,0.25);
+  box-shadow: none;
+}
+.daily__celebrate-title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px; font-weight: 900; color: #ffe39a; letter-spacing: 0.04em;
+}
+.daily__celebrate-sub {
+  margin-top: 4px;
+  font-size: 12px; color: rgba(241,230,200,0.7);
+}
+@keyframes dailyCelebrate {
+  from { transform: scale(0.92); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+.daily__status {
+  text-align: center; padding: 18px;
+  color: rgba(241,230,200,0.6); font-style: italic;
+}
+
+.daily__hint {
+  text-align: center; font-size: 11px; font-style: italic;
+  color: rgba(241,230,200,0.55);
+}
+.daily__footer {
+  text-align: center; font-size: 10px;
+  color: rgba(241,230,200,0.40); letter-spacing: 0.04em;
+}
+
+/* ===========================================================================
+   P4: WEAPON UNLOCK UI -- big art cards + shard-gated unlock CTA
+   Overrides + adds to the old .ws__ block above. New classes live here.
+   =========================================================================== */
+
+/* Top bar: keeps Back button (absolute), adds SHARDS pill (absolute right).
+ * Title + mode below still center-flow from .weapon-select padding. */
+/* P4 v2: shards pill goes TOP-LEFT (Back stays top-right via override below)
+ * because the old absolute Back position collided with the right-side pill. */
+.ws__topbar { display: none; } /* legacy wrapper -- no longer used */
+.ws__back {
+  /* override of older rule (line ~517) -- move Back to TOP-RIGHT */
+  left: auto !important;
+  right: 16px;
+}
+.ws__shards {
+  position: absolute; top: 16px; left: 16px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: rgba(20,14,8,0.7);
+  border: 1px solid rgba(255,204,85,0.35); border-radius: 999px;
+  color: #ffe39a; font-weight: 900;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.4);
+}
+.ws__shards-icon { font-size: 13px; }
+.ws__shards-val { font-size: 13px; letter-spacing: 0.05em; }
+
+/* Wider grid + taller cards so the PNG art has room to breathe. */
+.ws__grid {
+  max-width: 420px;
+  gap: 12px;
+}
+
+/* Override old card sizing: cards now show big art image, not emoji icon.
+ * P4 v2: bumped min-height + art scale so the character pose reads clearly. */
+.ws__card {
+  padding: 10px 8px 12px;
+  gap: 6px;
+  min-height: 260px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.ws__card:active { transform: scale(0.97); }
+
+/* Locked card: greyscale art + dimmed text, BUT still tap-able. The old rule
+ * set cursor:not-allowed which we override here -- locked cards are now
+ * selectable so the bottom CTA can morph into the UNLOCK button. */
+.ws__card--locked {
+  opacity: 1 !important;
+  cursor: pointer !important;
+  border-color: rgba(255,255,255,0.08);
+  background: rgba(15,12,8,0.7);
+}
+.ws__card--locked .ws__art-img {
+  filter: grayscale(1) brightness(0.55);
+}
+.ws__card--locked .ws__card-name {
+  color: rgba(241,230,200,0.55);
+}
+.ws__card--locked .ws__card-identity {
+  color: rgba(180,170,150,0.45);
+}
+.ws__card--locked.ws__card--selected {
+  border-color: #b478ff !important;
+  background: rgba(120,80,200,0.12);
+  box-shadow: 0 0 18px rgba(180,120,255,0.35);
+}
+
+/* Art container: square-ish, lets the PNG dominate. object-fit contain
+ * preserves the full-character pose without cropping the weapon. */
+.ws__art {
+  position: relative;
+  width: 100%; aspect-ratio: 1 / 1;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(40,28,16,0.55) 0%, rgba(0,0,0,0) 70%);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ws__art-img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  /* P4 v2: PNG has lots of transparent padding around the character, so
+   * scale the image up inside its container to make the char read big. */
+  transform: scale(1.35);
+  transform-origin: center 55%;
+  /* drop shadow to lift sprite off the card bg */
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6));
+  pointer-events: none;
+}
+
+/* Lock overlay: stays inside the art square, doesn't cover the text below. */
+.ws__lock-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px;
+  background: linear-gradient(180deg, rgba(20,16,30,0.25) 0%, rgba(10,8,20,0.55) 100%);
+  pointer-events: none;
+}
+.ws__lock-icon {
+  font-size: 32px;
+  filter: drop-shadow(0 0 8px rgba(180,120,255,0.6));
+}
+.ws__lock-price {
+  padding: 4px 10px;
+  background: linear-gradient(180deg, #6d3fb8 0%, #4a2890 100%);
+  border: 1px solid rgba(220,180,255,0.6);
+  border-radius: 999px;
+  color: #fff; font-size: 11px; font-weight: 900; letter-spacing: 0.06em;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.20), 0 2px 6px rgba(0,0,0,0.5);
+}
+
+/* "FREE" chip on the Sword card (full-run mode only) -- tiny visual cue
+ * that contrasts with the purple price chips on locked siblings. */
+.ws__free-chip {
+  position: absolute; top: 6px; left: 6px;
+  padding: 3px 7px;
+  background: linear-gradient(180deg, #2d6a3a 0%, #1a4524 100%);
+  border: 1px solid rgba(180,255,200,0.45);
+  border-radius: 999px;
+  color: #d4ffd8; font-size: 9px; font-weight: 900; letter-spacing: 0.1em;
+}
+
+/* Card text rows below the art. */
+.ws__card-name {
+  font-size: 14px; font-weight: 800; letter-spacing: 0.1em;
+  color: var(--fg);
+}
+.ws__card-identity {
+  font-size: 10px; color: var(--muted); text-align: center; line-height: 1.3;
+}
+
+/* Bottom CTA buttons. .ws__begin is reused from the old block. */
+.ws__unlock {
+  margin-top: 4px; width: 100%; max-width: 420px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #8a4fd4 0%, #6033b0 50%, #3a1e80 100%);
+  color: #fff;
+  border: 1px solid rgba(220,180,255,0.55); border-radius: 14px;
+  font-family: inherit; font-size: 14px; font-weight: 900;
+  letter-spacing: 0.10em; text-transform: uppercase;
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,0.30),
+    inset 0 -2px 0 rgba(30,10,60,0.55),
+    0 6px 16px rgba(0,0,0,0.5),
+    0 0 18px rgba(180,120,255,0.30);
+  cursor: pointer;
+  transition: transform 0.08s;
+}
+.ws__unlock:active { transform: scale(0.97); }
+.ws__unlock--disabled {
+  background: linear-gradient(180deg, #4a4458 0%, #2a2538 100%);
+  border-color: rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.55);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 2px 6px rgba(0,0,0,0.4);
+  cursor: not-allowed;
+}
+.ws__cta-sub {
+  margin-top: 4px;
+  font-size: 11px; color: rgba(241,230,200,0.55);
+  letter-spacing: 0.04em;
+  text-align: center;
 }

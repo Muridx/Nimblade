@@ -19,6 +19,13 @@ import {
 } from "../data/ascensionEffects.js";
 import { fetchTopRuns, getDisplayName, setDisplayName } from "../data/leaderboard.js";
 import { isSupabaseReady } from "../data/supabase.js";
+import {
+  fetchDailyStatus,
+  claimDaily,
+  DAILY_REWARDS,
+  DAILY_CYCLE_TOTAL,
+  rewardForDay,
+} from "../data/dailyLogin.js";
 
 // 2.7e P0: Nimiq Pay wallet now wired via @nimiq/mini-app-sdk.
 // `Connect Wallet` button calls connectWallet() which init()s the SDK,
@@ -56,6 +63,20 @@ let lbOpen = false;
 let lbRows = null;     // null = loading, [] = empty, [...] = loaded
 let lbError = null;
 
+// P3b: Daily Login modal + claim state.
+//   dailyOpen          -> modal visible
+//   dailyStatus        -> last RPC payload from daily_status (or null = not loaded)
+//   dailyClaiming      -> true while claim RPC in flight (disables button)
+//   dailyClaimResult   -> last claim_daily payload to show in modal
+//                         (e.g. "+3 SHARDS" celebration line)
+//   dailyAutoShownFor  -> wallet address we already auto-popped modal for, so
+//                         we don't keep re-opening on every render
+let dailyOpen = false;
+let dailyStatus = null;
+let dailyClaiming = false;
+let dailyClaimResult = null;
+let dailyAutoShownFor = null;
+
 // M4: branch metadata for forge modal layout. Ordered left->right.
 const FORGE_BRANCHES = [
   { key: "survival",  icon: "\u2764\ufe0f", label: "SURVIVAL"  },
@@ -72,7 +93,16 @@ export function lobbyScene(root) {
   lbOpen = false;
   lbRows = null;
   lbError = null;
+  // P3b: reset daily modal state per scene mount, BUT keep dailyAutoShownFor
+  // across re-mounts (player returning to lobby after a run shouldn't get
+  // the auto-popup again if they already saw it once today).
+  dailyOpen = false;
+  dailyClaiming = false;
+  dailyClaimResult = null;
   render(root);
+  // Fire-and-forget daily status refresh if wallet connected. Triggers a
+  // re-render to show the "!" badge + auto-popup the modal once per day.
+  refreshDailyStatus(root, { allowAutoPopup: true });
 
   const onClick = async (e) => {
     const target = e.target.closest("[data-action]");
@@ -86,6 +116,9 @@ export function lobbyScene(root) {
         if (confirm(`Disconnect wallet ${shortAddr(wallet.address)}?`)) {
           const meta = getState().meta || {};
           setState({ meta: { ...meta, wallet: null } });
+          // P3b: wallet disconnect -> hide daily badge + clear cached status.
+          dailyStatus = null;
+          dailyAutoShownFor = null;
           render(root);
         }
         return;
@@ -94,8 +127,15 @@ export function lobbyScene(root) {
       setBtnText(root, "Connecting...");
       const res = await connectWallet();
       connecting = false;
-      if (res.ok) render(root);
-      else { alert(res.error || "Wallet connect failed."); render(root); }
+      if (res.ok) {
+        render(root);
+        // P3b: fresh wallet -> fetch daily status so badge + auto-popup work
+        // immediately without waiting for a scene re-mount.
+        refreshDailyStatus(root, { allowAutoPopup: true });
+      } else {
+        alert(res.error || "Wallet connect failed.");
+        render(root);
+      }
       return;
     }
     if (action === "start-run") {
@@ -166,9 +206,14 @@ export function lobbyScene(root) {
       return;
     }
     if (action === "asc-select") {
-      const lvl = clampAsc(parseInt(t.dataset.level, 10));
+      const lvl = clampAsc(parseInt(target.dataset.level, 10));
       ascSelected = lvl;
+      // Preserve scroll position of the asc list across re-render so tapping
+      // a card near the bottom doesn't yank the user back to the top.
+      const prevScroll = root.querySelector(".asc__list")?.scrollTop ?? 0;
       render(root);
+      const newList = root.querySelector(".asc__list");
+      if (newList) newList.scrollTop = prevScroll;
       return;
     }
     if (action === "asc-confirm") {
@@ -231,12 +276,78 @@ export function lobbyScene(root) {
       render(root);
       return;
     }
+    // P3b: Daily Login modal handlers.
+    //   open-daily   -> open modal. If status not loaded yet, kick fetch.
+    //   close-daily  -> close modal.
+    //   daily-stop   -> swallow inside-card clicks (backdrop dismiss).
+    //   claim-daily  -> call server claim_daily(wallet), credit shards on ok.
+    if (action === "open-daily") {
+      const meta = getState().meta || {};
+      if (!meta.wallet) {
+        // Manual badge tap with no wallet -> friendly nudge instead of modal.
+        showToast(root, "\ud83d\udd17 Connect wallet first", "Daily login rewards are wallet-only. Tap CONNECT in the top-right, then come back here to claim your daily shards.");
+        return;
+      }
+      dailyOpen = true;
+      dailyClaimResult = null;
+      render(root);
+      // If status missing or stale, refresh in background.
+      if (!dailyStatus) refreshDailyStatus(root, { allowAutoPopup: false });
+      return;
+    }
+    if (action === "close-daily") {
+      dailyOpen = false;
+      dailyClaimResult = null;
+      render(root);
+      return;
+    }
+    if (action === "daily-stop") {
+      return; // swallow clicks inside card
+    }
+    if (action === "claim-daily") {
+      const meta = getState().meta || {};
+      if (!meta.wallet) {
+        showToast(root, "\ud83d\udd17 Wallet required", "Connect your wallet first to claim daily rewards.");
+        return;
+      }
+      if (dailyClaiming) return;
+      if (dailyStatus && dailyStatus.can_claim === false) return;
+      dailyClaiming = true;
+      render(root);
+      const res = await claimDaily(meta.wallet.address);
+      dailyClaiming = false;
+      if (res.ok) {
+        // Credit shards to local meta and refresh status from server.
+        const fresh = getState().meta || {};
+        const shardsNow = (Number(fresh.shards) || 0) + (Number(res.shards_earned) || 0);
+        setState({ meta: { ...fresh, shards: shardsNow } });
+        dailyClaimResult = res;
+        await refreshDailyStatus(root, { allowAutoPopup: false });
+        render(root);
+      } else {
+        // Server says no -- typical case: already claimed (e.g. another device
+        // claimed earlier today). Reflect that state and re-fetch status.
+        dailyClaimResult = res;
+        await refreshDailyStatus(root, { allowAutoPopup: false });
+        render(root);
+      }
+      return;
+    }
+
     if (action === "toast-close") {
       const t = root.querySelector(".lobby__toast");
       if (t) t.remove();
       return;
     }
     if (action === "toast-stop") return;
+
+    // P3a: settings card stub. Full settings modal (display name, audio,
+    // reset progress, about) ships in P3c. For now show a toast so the
+    // card is wired and tap target works.
+    if (action === "open-settings") {
+      showToast(root, "\u2699\ufe0f SETTINGS", "Display name lives inside LEADERBOARD for now. Audio toggle + reset progress + about screen ship in the next polish pass (P3c).");
+      return;
+    }
   };
 
   root.addEventListener("click", onClick);
@@ -264,13 +375,30 @@ function nodeStatus(node, meta) {
 function render(root) {
   const meta = getState().meta || {};
   const wallet = meta.wallet;
-  const walletLabel = wallet ? shortAddr(wallet.address) : "Connect Wallet";
+  const walletLabel = wallet ? shortAddr(wallet.address) : "CONNECT";
+  const walletIcon = wallet ? "\u26d3" : "\u26d3"; // chain link icon both states
 
   const shards = Number(meta.shards) || 0;
+  const shardsDisplay = shards.toLocaleString("en-US");
   const ch1Cleared = !!meta.ch1Cleared;
-  const ascLevel = Math.max(0, Math.min(5, Number(meta.ascension) || 0));
-  const ascLabel = ch1Cleared ? `ASC ${ascLevel}` : "ASC \uD83D\uDD12";
-  const ascClass = ch1Cleared ? "lobby__chip lobby__chip--asc" : "lobby__chip lobby__chip--asc lobby__chip--locked";
+  const ascLevel = clampAsc(meta.ascension);
+
+  // P3a: ASCENSION card sub-text + accent state.
+  //   - Not unlocked: "\ud83d\udd12 Locked" + dimmed card
+  //   - Standard (lvl 0): "Standard"
+  //   - Lvl 1-5: "Tier N \u00b7 xMULT" with gold accent border
+  let ascSub, ascCardClass;
+  if (!ch1Cleared) {
+    ascSub = "\ud83d\udd12 Locked";
+    ascCardClass = "lobby__card lobby__card--locked";
+  } else if (ascLevel === 0) {
+    ascSub = "Standard";
+    ascCardClass = "lobby__card";
+  } else {
+    const mult = ASCENSION_LEVELS[ascLevel].shardMult.toFixed(2);
+    ascSub = `Tier ${ascLevel} \u00b7 x${mult}`;
+    ascCardClass = "lobby__card lobby__card--accent";
+  }
 
   // M4: forge modal HTML appended at end of lobby (covers screen when forgeOpen).
   const forgeModalHTML = forgeOpen ? renderForgeModalHTML(meta) : "";
@@ -278,31 +406,273 @@ function render(root) {
   const ascModalHTML = ascOpen ? renderAscensionModalHTML(meta) : "";
   // M8: leaderboard modal.
   const lbModalHTML = lbOpen ? renderLeaderboardModalHTML() : "";
+  // P3b: daily login modal.
+  const dailyModalHTML = dailyOpen ? renderDailyModalHTML(meta) : "";
 
+  // P3b: daily login pill. Sits between SHARDS and WALLET in the top bar.
+  //   - Wallet not connected -> hidden entirely (no point teasing).
+  //   - Wallet connected, status loading -> show gift icon, no badge.
+  //   - Wallet connected, can_claim -> show gift icon + red "!" badge dot.
+  //   - Wallet connected, already claimed today -> show gift icon dimmed.
+  let dailyPillHTML = "";
+  if (wallet) {
+    const canClaim = !!(dailyStatus && dailyStatus.can_claim);
+    const pillClass = canClaim
+      ? "lobby__daily lobby__daily--ready"
+      : "lobby__daily";
+    const badgeHTML = canClaim ? `<span class="lobby__daily-badge">!</span>` : "";
+    const ariaLabel = canClaim ? "Daily reward ready to claim" : "Daily login";
+    dailyPillHTML = `
+      <div class="${pillClass}" role="button" tabindex="0" data-action="open-daily" aria-label="${ariaLabel}">
+        <span class="lobby__daily-icon">\ud83c\udf81</span>
+        ${badgeHTML}
+      </div>
+    `;
+  }
+
+  // P3a: PREMIUM LOBBY V3 LAYOUT
+  //   - Top bar: SHARDS pill (left, gold-tinted glass) + WALLET pill (right)
+  //   - Title block: PNG logo (300x110, glow) + tagline "A ROGUELITE DUEL"
+  //   - 2x2 menu grid: FORGE / ASCENSION / LEADERBOARD / SETTINGS
+  //     (full labels, icon + label + sub-text per card, glassmorphism)
+  //   - CTA stack at bottom: START RUN (premium gold) + TRY DEMO (ghost glass)
+  //     + demo hint
+  // All chip clutter from M3 is gone; menu lives in cards instead.
   root.innerHTML = `
     <div class="lobby">
-      <div class="lobby__header">
-        <div class="lobby__header-left">
-          <button class="lobby__chip lobby__chip--shards" data-action="open-forge" aria-label="Shards (${shards})">
-            <span class="lobby__chip-icon">\uD83D\uDC8E</span>
-            <span class="lobby__chip-val">${shards}</span>
-          </button>
-          <button class="lobby__chip lobby__chip--forge" data-action="open-forge">FORGE</button>
-          <button class="${ascClass}" data-action="open-ascension">${ascLabel}</button>
-          <button class="lobby__chip lobby__chip--lb" data-action="open-leaderboard" aria-label="Leaderboard">\ud83c\udfc6</button>
+      <div class="lobby__top">
+        <div class="lobby__shards" role="button" tabindex="0" data-action="open-forge" aria-label="Shards (${shards})">
+          <div class="lobby__shards-icon">\ud83d\udc8e</div>
+          <div class="lobby__shards-text">
+            <div class="lobby__shards-val">${shardsDisplay}</div>
+            <div class="lobby__shards-label">SHARDS</div>
+          </div>
         </div>
-        <button class="lobby__wallet" data-action="wallet">${walletLabel}</button>
+        <div class="lobby__top-right">
+          ${dailyPillHTML}
+          <button class="lobby__wallet" data-action="wallet" aria-label="${wallet ? 'Wallet ' + escapeHTML(walletLabel) : 'Connect Wallet'}">
+            <span class="lobby__wallet-icon">${walletIcon}</span>
+            <span class="lobby__wallet-label">${escapeHTML(walletLabel)}</span>
+          </button>
+        </div>
       </div>
-      <div class="lobby__title">NIMBLADE</div>
-      <div class="lobby__spacer"></div>
-      <div class="lobby__actions">
-        <button class="btn btn--primary" data-action="start-run">START RUN</button>
-        <button class="btn btn--secondary" data-action="try-demo">TRY DEMO</button>
+
+      <div class="lobby__titleblock">
+        <div class="lobby__logo" role="img" aria-label="NIMBLADE"></div>
+        <div class="lobby__tagline">A Roguelite Duel</div>
+      </div>
+
+      <div class="lobby__menu">
+        <div class="lobby__card" role="button" tabindex="0" data-action="open-forge">
+          <div class="lobby__card-icon">\u2692\ufe0f</div>
+          <div class="lobby__card-label">FORGE</div>
+          <div class="lobby__card-sub">Meta Upgrades</div>
+        </div>
+        <div class="${ascCardClass}" role="button" tabindex="0" data-action="open-ascension">
+          <div class="lobby__card-icon">\ud83c\udf1f</div>
+          <div class="lobby__card-label">ASCENSION</div>
+          <div class="lobby__card-sub">${ascSub}</div>
+        </div>
+        <div class="lobby__card" role="button" tabindex="0" data-action="open-leaderboard">
+          <div class="lobby__card-icon">\ud83c\udfc6</div>
+          <div class="lobby__card-label">LEADERBOARD</div>
+          <div class="lobby__card-sub">Global Ranks</div>
+        </div>
+        <div class="lobby__card" role="button" tabindex="0" data-action="open-settings">
+          <div class="lobby__card-icon">\u2699\ufe0f</div>
+          <div class="lobby__card-label">SETTINGS</div>
+          <div class="lobby__card-sub">Name \u00b7 Audio \u00b7 Reset</div>
+        </div>
+      </div>
+
+      <div class="lobby__cta">
+        <button class="btn btn--primary lobby__btn-start" data-action="start-run">START RUN</button>
+        <button class="btn btn--secondary lobby__btn-demo" data-action="try-demo">TRY DEMO</button>
         <p class="lobby__hint">Demo runs Chapter 1 only, no wallet needed</p>
       </div>
+
       ${forgeModalHTML}
       ${ascModalHTML}
       ${lbModalHTML}
+      ${dailyModalHTML}
+    </div>
+  `;
+}
+
+// P3b: helper -- fetch latest daily_status for the connected wallet and
+// re-render the lobby. If allowAutoPopup is true AND can_claim AND we
+// haven't already auto-opened for this wallet this scene-lifetime, open
+// the modal automatically so the player knows free shards are waiting.
+async function refreshDailyStatus(root, { allowAutoPopup = false } = {}) {
+  const meta = getState().meta || {};
+  const wallet = meta.wallet;
+  if (!wallet) {
+    dailyStatus = null;
+    return;
+  }
+  const status = await fetchDailyStatus(wallet.address);
+  dailyStatus = status;
+  if (allowAutoPopup
+      && status && status.ok && status.can_claim
+      && dailyAutoShownFor !== wallet.address
+      && !dailyOpen) {
+    dailyAutoShownFor = wallet.address;
+    dailyOpen = true;
+  }
+  render(root);
+}
+
+/**
+ * P3b: Render the Daily Login claim modal.
+ *
+ * Layout (mobile-first, 360px target):
+ *   - Header: "\ud83c\udf1f DAILY LOGIN" + close X
+ *   - Streak strip: "\ud83d\udd25 Day N streak" + total earned
+ *   - 7-day grid (2 rows x 4 cols on narrow, all in a row if it fits):
+ *     each cell shows Day label, shard reward, status icon
+ *     (\u2705 claimed, \ud83d\udcaa TODAY, \ud83d\udd12 future)
+ *   - Big CLAIM button OR "Already claimed today" state
+ *   - Hint line: "Miss a day -> streak resets to Day 1"
+ *   - Footer note: "Server-verified, one claim per UTC day"
+ */
+function renderDailyModalHTML(meta) {
+  const wallet = meta.wallet;
+  const status = dailyStatus;
+  const claimResult = dailyClaimResult;
+
+  // Compute the day to spotlight + which days are claimed/today/future.
+  // Server only tracks current_streak (the last day claimed). We project a
+  // 7-day strip showing the CURRENT cycle: days 1..7 with claimed/today
+  // markers derived from current_streak + can_claim + streak_alive.
+  const currentStreak = (status && Number(status.current_streak)) || 0;
+  const canClaim = !!(status && status.can_claim);
+  const streakAlive = !!(status && status.streak_alive);
+  const nextDay = (status && Number(status.next_day)) || 1;
+  const totalEarned = currentStreak > 0
+    ? DAILY_REWARDS.slice(1, Math.min(currentStreak, 7) + 1).reduce((a, b) => a + b, 0)
+    : 0;
+
+  // Decide grid status per slot.
+  //   - If canClaim:
+  //       days 1..(nextDay-1) -> claimed (\u2705) IF streakAlive, else future
+  //       day nextDay         -> TODAY (\ud83d\udcaa) -- highlighted
+  //       days nextDay+1..7   -> future (\ud83d\udd12)
+  //   - If !canClaim (already claimed today):
+  //       days 1..currentStreak -> claimed (\u2705)
+  //       days currentStreak+1..7 -> future (\ud83d\udd12)
+  function slotState(day) {
+    if (canClaim) {
+      if (streakAlive && day < nextDay) return "claimed";
+      if (day === nextDay) return "today";
+      return "future";
+    }
+    if (day <= currentStreak) return "claimed";
+    return "future";
+  }
+
+  const gridCells = [];
+  for (let d = 1; d <= 7; d++) {
+    const reward = DAILY_REWARDS[d];
+    const isJackpot = d === 7;
+    const st = slotState(d);
+    let cellClass = "daily__day";
+    let icon = "\ud83d\udd12";
+    if (st === "claimed") { cellClass += " daily__day--claimed"; icon = "\u2705"; }
+    else if (st === "today") { cellClass += " daily__day--today"; icon = "\ud83d\udcaa"; }
+    if (isJackpot) cellClass += " daily__day--jackpot";
+    gridCells.push(`
+      <div class="${cellClass}">
+        <div class="daily__day-label">Day ${d}</div>
+        <div class="daily__day-reward">${reward}<span class="daily__gem">\ud83d\udc8e</span></div>
+        <div class="daily__day-state">${icon}</div>
+      </div>
+    `);
+  }
+
+  // CTA / status line below the grid.
+  let ctaHTML = "";
+  if (!wallet) {
+    ctaHTML = `
+      <div class="daily__nowallet">
+        <div class="daily__nowallet-text">Connect your wallet to claim daily shards.</div>
+        <button class="btn btn--primary daily__connect" data-action="wallet">CONNECT WALLET</button>
+      </div>
+    `;
+  } else if (!status) {
+    ctaHTML = `<div class="daily__status">Loading...</div>`;
+  } else if (canClaim) {
+    const reward = rewardForDay(nextDay);
+    const dayLabel = (currentStreak === 0 || !streakAlive)
+      ? `Start a new streak today \u2192 +${reward} shard`
+      : `Day ${nextDay} streak reward \u2192 +${reward} shard`;
+    ctaHTML = `
+      <button class="btn btn--primary daily__claim ${dailyClaiming ? 'daily__claim--loading' : ''}"
+              data-action="claim-daily"
+              ${dailyClaiming ? 'disabled' : ''}>
+        ${dailyClaiming ? "CLAIMING..." : `\u2728 CLAIM ${reward} SHARDS \u2728`}
+      </button>
+      <div class="daily__status-line">${escapeHTML(dayLabel)}</div>
+    `;
+  } else {
+    ctaHTML = `
+      <div class="daily__done">
+        <div class="daily__done-title">\u2705 Already claimed today</div>
+        <div class="daily__done-sub">Come back tomorrow for Day ${nextDay} (+${rewardForDay(nextDay)} shard).</div>
+      </div>
+    `;
+  }
+
+  // If we just succeeded with a claim, show a celebration line above the grid.
+  let celebrationHTML = "";
+  if (claimResult && claimResult.ok) {
+    const earned = Number(claimResult.shards_earned) || 0;
+    const dayJust = Number(claimResult.streak_day) || 1;
+    const verb = claimResult.status === "reset"
+      ? "Streak restarted"
+      : claimResult.status === "first_claim"
+        ? "Streak started"
+        : "Streak continued";
+    celebrationHTML = `
+      <div class="daily__celebrate">
+        <div class="daily__celebrate-title">+${earned} \ud83d\udc8e claimed!</div>
+        <div class="daily__celebrate-sub">${verb} \u00b7 Day ${dayJust} of 7</div>
+      </div>
+    `;
+  } else if (claimResult && !claimResult.ok && claimResult.error === "already_claimed") {
+    celebrationHTML = `
+      <div class="daily__celebrate daily__celebrate--info">
+        <div class="daily__celebrate-title">Already claimed</div>
+        <div class="daily__celebrate-sub">Another session beat you to it today. Streak is safe.</div>
+      </div>
+    `;
+  }
+
+  const streakHTML = currentStreak > 0
+    ? `<div class="daily__streak">
+         <span class="daily__streak-icon">\ud83d\udd25</span>
+         <span class="daily__streak-text">Day ${currentStreak} streak</span>
+         <span class="daily__streak-total">${totalEarned} \ud83d\udc8e this cycle</span>
+       </div>`
+    : `<div class="daily__streak daily__streak--zero">
+         <span class="daily__streak-icon">\ud83c\udf31</span>
+         <span class="daily__streak-text">No streak yet</span>
+         <span class="daily__streak-total">${DAILY_CYCLE_TOTAL} \ud83d\udc8e per full week</span>
+       </div>`;
+
+  return `
+    <div class="lobby__toast forge__overlay" data-action="close-daily">
+      <div class="forge__card daily__card" data-action="daily-stop">
+        <div class="forge__header">
+          <div class="forge__title">\ud83c\udf1f DAILY LOGIN</div>
+          <button class="forge__close" data-action="close-daily" aria-label="Close">\u00d7</button>
+        </div>
+        ${celebrationHTML}
+        ${streakHTML}
+        <div class="daily__grid">${gridCells.join("")}</div>
+        ${ctaHTML}
+        <div class="daily__hint">Miss a day \u2192 streak resets to Day 1.</div>
+        <div class="daily__footer">Server-verified \u00b7 one claim per UTC day \u00b7 wallet-only.</div>
+      </div>
     </div>
   `;
 }
@@ -390,14 +760,14 @@ function renderAscensionModalHTML(meta) {
     const multLabel = `x${lv.shardMult.toFixed(2)}`;
     const currentTag = isCurrent ? `<span class="asc__row-current-tag">CURRENT</span>` : "";
     return `
-      <button class="asc__row ${stateClasses}" data-action="asc-select" data-level="${lv.level}">
+      <div class="asc__row ${stateClasses}" role="button" tabindex="0" data-action="asc-select" data-level="${lv.level}">
         <div class="asc__row-head">
           <div class="asc__row-name">${escapeHTML(lv.name)} ${currentTag}</div>
           <div class="asc__row-mult">\ud83d\udc8e ${multLabel}</div>
         </div>
         <div class="asc__row-summary">${escapeHTML(lv.summary)}</div>
         <div class="asc__row-effects">${effectsHTML}</div>
-      </button>
+      </div>
     `;
   }).join("");
 
