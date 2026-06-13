@@ -5,6 +5,7 @@ import weaponsData from "../data/weapons.json";
 import relicsData from "../data/relics.json";
 import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import { addRunGold, payoutShards } from "../data/runHelpers.js";
+import { submitRun as leaderboardSubmitRun } from "../data/leaderboard.js";
 import {
   forgeSlashBonus,
   forgeComboThreshold,
@@ -400,6 +401,13 @@ export function battleScene(root, opts) {
     // CH1 is the only boss floor in v1 so isCh1BossClear is always true here.
     state.runEndShards = payoutShards({ run: newRun, isCh1BossClear: true });
     state.bossRewardTaken = took ? "take" : "skip";
+    // M8: fire-and-forget submit to Supabase leaderboard. Safe no-op when
+    // env vars missing. We don't await -- never block the UI render on
+    // network. The result overlay will already be shown by the time the
+    // POST completes.
+    leaderboardSubmitRun(newRun).then((res) => {
+      if (res.ok) console.log("[leaderboard] submitted run", res.row.id);
+    });
     render();
   };
 

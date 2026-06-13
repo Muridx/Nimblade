@@ -17,6 +17,8 @@ import {
   describeAscensionRunEffects,
   clampAsc,
 } from "../data/ascensionEffects.js";
+import { fetchTopRuns, getDisplayName, setDisplayName } from "../data/leaderboard.js";
+import { isSupabaseReady } from "../data/supabase.js";
 
 // 2.7e P0: Nimiq Pay wallet now wired via @nimiq/mini-app-sdk.
 // `Connect Wallet` button calls connectWallet() which init()s the SDK,
@@ -49,6 +51,11 @@ let forgeSelectedKey = null;
 let ascOpen = false;
 let ascSelected = null;
 
+// M8: leaderboard modal state.
+let lbOpen = false;
+let lbRows = null;     // null = loading, [] = empty, [...] = loaded
+let lbError = null;
+
 // M4: branch metadata for forge modal layout. Ordered left->right.
 const FORGE_BRANCHES = [
   { key: "survival",  icon: "\u2764\ufe0f", label: "SURVIVAL"  },
@@ -62,6 +69,9 @@ export function lobbyScene(root) {
   forgeSelectedKey = null;
   ascOpen = false;
   ascSelected = null;
+  lbOpen = false;
+  lbRows = null;
+  lbError = null;
   render(root);
 
   const onClick = async (e) => {
@@ -186,6 +196,41 @@ export function lobbyScene(root) {
     if (action === "asc-stop") {
       return; // swallow clicks inside the modal card
     }
+
+    // M8: Leaderboard modal handlers.
+    if (action === "open-leaderboard") {
+      lbOpen = true;
+      lbRows = null;
+      lbError = null;
+      render(root);
+      // Kick off fetch; re-render when it lands.
+      fetchTopRuns(10).then((rows) => {
+        lbRows = rows;
+        if (!isSupabaseReady()) lbError = "Leaderboard not configured (env vars missing).";
+        if (lbOpen) render(root);
+      }).catch((e) => {
+        lbRows = [];
+        lbError = String(e && e.message || e);
+        if (lbOpen) render(root);
+      });
+      return;
+    }
+    if (action === "lb-close") {
+      lbOpen = false;
+      render(root);
+      return;
+    }
+    if (action === "lb-stop") {
+      return; // swallow clicks inside modal card
+    }
+    if (action === "lb-save-name") {
+      const input = root.querySelector(".lb__name-input");
+      const newName = input ? input.value : "";
+      const saved = setDisplayName(newName);
+      showToast(root, "Name saved", saved ? `Display name: <strong>${escapeHTML(saved)}</strong>` : "Display name cleared (will show as Anonymous).");
+      render(root);
+      return;
+    }
     if (action === "toast-close") {
       const t = root.querySelector(".lobby__toast");
       if (t) t.remove();
@@ -231,6 +276,8 @@ function render(root) {
   const forgeModalHTML = forgeOpen ? renderForgeModalHTML(meta) : "";
   // M6: ascension picker modal -- same overlay pattern as forge.
   const ascModalHTML = ascOpen ? renderAscensionModalHTML(meta) : "";
+  // M8: leaderboard modal.
+  const lbModalHTML = lbOpen ? renderLeaderboardModalHTML() : "";
 
   root.innerHTML = `
     <div class="lobby">
@@ -242,6 +289,7 @@ function render(root) {
           </button>
           <button class="lobby__chip lobby__chip--forge" data-action="open-forge">FORGE</button>
           <button class="${ascClass}" data-action="open-ascension">${ascLabel}</button>
+          <button class="lobby__chip lobby__chip--lb" data-action="open-leaderboard" aria-label="Leaderboard">\ud83c\udfc6</button>
         </div>
         <button class="lobby__wallet" data-action="wallet">${walletLabel}</button>
       </div>
@@ -254,6 +302,64 @@ function render(root) {
       </div>
       ${forgeModalHTML}
       ${ascModalHTML}
+      ${lbModalHTML}
+    </div>
+  `;
+}
+
+/**
+ * M8: Render the LEADERBOARD modal. Shows top 10 by gold_earned + a small
+ * display-name input the player can edit. Uses the same forge__overlay
+ * scaffolding so we keep CSS surface small.
+ */
+function renderLeaderboardModalHTML() {
+  const name = getDisplayName();
+  const configured = isSupabaseReady();
+  let bodyHTML = "";
+  if (!configured) {
+    bodyHTML = `
+      <div class="lb__empty">
+        Leaderboard offline. Set <code>VITE_SUPABASE_URL</code> + <code>VITE_SUPABASE_ANON_KEY</code> in <code>.env.local</code> and on Vercel, then redeploy.
+      </div>`;
+  } else if (lbRows === null) {
+    bodyHTML = `<div class="lb__empty">Loading...</div>`;
+  } else if (lbError) {
+    bodyHTML = `<div class="lb__empty">Error: ${escapeHTML(lbError)}</div>`;
+  } else if (lbRows.length === 0) {
+    bodyHTML = `<div class="lb__empty">No runs yet. Be the first to clear Ch1!</div>`;
+  } else {
+    const rows = lbRows.map((r, i) => {
+      const rank = i + 1;
+      const rankClass = rank === 1 ? "lb__rank--1" : rank === 2 ? "lb__rank--2" : rank === 3 ? "lb__rank--3" : "";
+      const asc = (Number(r.ascension) || 0) > 0 ? ` \u00b7 A${r.ascension}` : "";
+      const wep = String(r.weapon || "?").slice(0, 8);
+      return `
+        <div class="lb__row">
+          <div class="lb__rank ${rankClass}">#${rank}</div>
+          <div class="lb__name">${escapeHTML(r.display_name || "Anonymous")}</div>
+          <div class="lb__meta">${escapeHTML(wep)}${asc}</div>
+          <div class="lb__gold">\ud83d\udcb0 ${r.gold_earned}</div>
+        </div>
+      `;
+    }).join("");
+    bodyHTML = `<div class="lb__list">${rows}</div>`;
+  }
+
+  return `
+    <div class="lobby__toast forge__overlay" data-action="lb-close">
+      <div class="forge__card lb__card" data-action="lb-stop">
+        <div class="forge__header">
+          <div class="forge__title">\ud83c\udfc6 LEADERBOARD</div>
+          <button class="forge__close" data-action="lb-close" aria-label="Close">\u00d7</button>
+        </div>
+        <div class="lb__name-row">
+          <label class="lb__name-label">Your name:</label>
+          <input class="lb__name-input" type="text" maxlength="24" placeholder="Anonymous" value="${escapeHTML(name)}" />
+          <button class="btn btn--secondary lb__name-save" data-action="lb-save-name">SAVE</button>
+        </div>
+        ${bodyHTML}
+        <div class="lb__footer">Top 10 by gold earned per chapter clear. Updates live after each boss kill.</div>
+      </div>
     </div>
   `;
 }
