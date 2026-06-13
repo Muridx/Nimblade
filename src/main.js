@@ -26,8 +26,10 @@ window.cheat = {
     const run = getState().run;
     if (!run) return console.warn("[cheat] no active run");
     run.gold = (run.gold || 0) + n;
+    // M2: keep cumulative totalGoldEarned in sync for shard payout testing.
+    if (n > 0) run.totalGoldEarned = (run.totalGoldEarned || 0) + n;
     setState({ run });
-    console.log(`[cheat] gold+=${n} -> ${run.gold}`);
+    console.log(`[cheat] gold+=${n} -> ${run.gold} (totalEarned ${run.totalGoldEarned})`);
   },
   shards: (n) => {
     const meta = getState().meta || {};

@@ -2,6 +2,8 @@ import { mountScene } from "./sceneManager.js";
 import { getState, setState } from "../state/store.js";
 import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import { renderRunInfoModalHTML } from "../ui/runInfoModal.js";
+import { addRunGold } from "../data/runHelpers.js";
+import { forgeRestHealBonus } from "../data/forgeEffects.js";
 
 /**
  * Campfire scene (2.7b-2): HEAL / SMOKE / SHARPEN.
@@ -44,19 +46,26 @@ export function campfireScene(root) {
     const newRun = { ...cur };
 
     if (sceneState.pendingChoice === "HEAL") {
-      const newHp = Math.min(maxHp, hp + 35);
+      // M5b: Survival T2 forge -- REST bonus on top of the base +35.
+      // Forged => +25 extra (so a 100-HP run heals 60 total, mirrors "60%").
+      const meta = getState().meta || {};
+      const baseHeal = 35;
+      const bonusHeal = forgeRestHealBonus(meta);
+      const totalHeal = baseHeal + bonusHeal;
+      const newHp = Math.min(maxHp, hp + totalHeal);
       const real = newHp - hp;
       newRun.playerHp = newHp;
+      const bonusTag = bonusHeal > 0 ? " (Forge: +25 bonus)" : "";
       sceneState.resolved = {
         kind: "HEAL",
         text: real > 0
-          ? `+${real} HP recovered (now ${newHp}/${maxHp})`
+          ? `+${real} HP recovered${bonusTag} (now ${newHp}/${maxHp})`
           : `+0 HP (already full at ${maxHp}/${maxHp})`,
       };
     } else if (sceneState.pendingChoice === "SMOKE") {
       const win = Math.random() < 0.5;
       if (win) {
-        newRun.gold = gold + 24;
+        addRunGold(newRun, 24); // M2: also bumps totalGoldEarned
         sceneState.resolved = { kind: "SMOKE_WIN", text: `+24 gold (lucky -- now ${newRun.gold})` };
       } else {
         const newHp = Math.max(1, hp - 10);

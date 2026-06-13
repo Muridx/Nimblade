@@ -4,6 +4,16 @@ import monstersData from "../data/monsters.json";
 import weaponsData from "../data/weapons.json";
 import relicsData from "../data/relics.json";
 import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
+import { addRunGold, payoutShards } from "../data/runHelpers.js";
+import {
+  forgeSlashBonus,
+  forgeComboThreshold,
+  forgeCounterLossReduction,
+  forgeWildStrikeCostReduction,
+  forgeUltCostReduction,
+} from "../data/forgeEffects.js";
+import { applyAscensionToEnemy, clampAsc } from "../data/ascensionEffects.js";
+import { rollMysteryRelicTier, pickMysteryRelic } from "../data/mysteryEvents.js";
 import {
   hasRelic,
   slashDmgBonus,
@@ -115,6 +125,16 @@ export function battleScene(root, opts) {
   const run = getState().run || { mode: "demo", weapon: "sword", chapter: "CH1", floor: 1, floorMax: 9, gold: 0, relics: [], playerHp: 100, playerMaxHp: 100 };
   const weapon = weaponsData[run.weapon] || weaponsData.sword;
   const S = weapon.stats;
+
+  // M5b: forge in-battle effective values. Resolved ONCE per battle mount.
+  // We snapshot meta here -- if Murid buys an upgrade mid-battle (impossible
+  // today: forge is lobby-only) it won't retro-apply, by design.
+  const meta = getState().meta || {};
+  const wsCost = Math.max(0, S.ws_cost - forgeWildStrikeCostReduction(meta));
+  const ultCost = Math.max(0, S.ult_cost - forgeUltCostReduction(meta));
+  const comboThreshold = forgeComboThreshold(meta);
+  const slashForgeBonus = forgeSlashBonus(meta);
+  const counterLossReduction = forgeCounterLossReduction(meta);
   const chapterKey = (run.chapter || "CH1").toLowerCase();
   const chapterData = monstersData[chapterKey] || monstersData.ch1;
   const bgImg = chapterData.background || "bg_ch1_goblin_caverns.png";
@@ -130,7 +150,10 @@ export function battleScene(root, opts) {
     ? mapCurrentNode.type
     : nodeTypeFor(run.chapter || "CH1", currentFloor);
   const isBossFloor = nodeType === "boss";
-  const isEliteFloor = nodeType === "elite";
+  // M9: Bandit Ambush forces the elite enemy pool + elite reward tier even
+  // though the underlying map node was a mystery. Treat it as elite from this
+  // point on for both enemy selection and reward generation.
+  const isEliteFloor = nodeType === "elite" || !!opts.forceElite;
   let enemyDef;
   if (opts.enemy) {
     enemyDef = opts.enemy;
@@ -156,6 +179,29 @@ export function battleScene(root, opts) {
     enemyDef = pool.find((m) => m.id === nextId) || pool[0];
     // persist remaining queue
     setState({ run: { ...getState().run, normalQueue: queue, normalQueueChapter: run.chapter } });
+  }
+  // M6: Ascension patch. Reassign enemyDef BEFORE any downstream reads so
+  // every `enemyDef.dmg / .hp / .honest_pct` reference auto-uses the
+  // ascended stats. Shallow clone -- monsters.json never mutated.
+  const ascLevel = clampAsc(run.ascension);
+  if (ascLevel > 0) {
+    const patched = applyAscensionToEnemy(enemyDef, ascLevel, isBossFloor);
+    enemyDef = patched;
+    console.log(`[ascension] Asc ${ascLevel} applied to ${enemyDef.id}:`, {
+      dmg: enemyDef.dmg,
+      hp: enemyDef.hp,
+      honest_pct: enemyDef.honest_pct,
+    });
+  }
+  // M9: Cursed Chest mystery event sets run.cursedNextBattle. We bump enemy
+  // dmg +50% for this fight ONLY, then clear the flag immediately so it
+  // never bleeds into the next battle. Bosses skipped -- curse can't apply
+  // to boss floors (mystery nodes never sit before boss).
+  const isCursedBattle = !!run.cursedNextBattle && !isBossFloor;
+  if (isCursedBattle) {
+    enemyDef = { ...enemyDef, dmg: Math.max(1, Math.round((enemyDef.dmg || 1) * 1.5)) };
+    setState({ run: { ...run, cursedNextBattle: false } });
+    console.log(`[mystery] curse active -- ${enemyDef.id} dmg patched to`, enemyDef.dmg);
   }
   const spriteId = enemyDef.sprite_id || enemyDef.id;
 
@@ -241,7 +287,7 @@ export function battleScene(root, opts) {
     if (diceRoll.gold) {
       // 2.7c-3: Golden Chalice 2x gold from all sources.
       const dGold = diceRoll.gold * goldenChaliceGoldMult(run);
-      run.gold = (run.gold || 0) + dGold;
+      addRunGold(run, dGold); // M2: bumps gold + totalGoldEarned
       setState({ run });
       state.log.push(`Gambler's Dice: +${dGold} gold!`);
     } else if (diceRoll.hp) {
@@ -275,7 +321,18 @@ export function battleScene(root, opts) {
       autoGrantedRelic = picks[0] || null;
     }
     // normal: relicChoices stays [] -> reward overlay shows gold + NEXT FLOOR button
-    state.rewardData = { gold, relicChoices, tier, autoGrantedRelic };
+    // M9: Bandit Ambush -- on top of the elite reward, roll ONE extra relic
+    // via the mystery distribution (3% epic / 30% rare / 67% common) and
+    // auto-grant on advance. Acts as "2 relics" payout per design §6.3.
+    let bonusBanditRelic = null;
+    if (run.banditAmbushPending && tier === "elite") {
+      const t = rollMysteryRelicTier();
+      bonusBanditRelic = pickMysteryRelic({ relics: run.relics || [] }, t) || null;
+      if (bonusBanditRelic) {
+        console.log(`[mystery] bandit bonus relic rolled tier=${t}:`, bonusBanditRelic.id);
+      }
+    }
+    state.rewardData = { gold, relicChoices, tier, autoGrantedRelic, bonusBanditRelic };
   };
 
   // Apply chosen reward to run state, then return to MAP (non-boss only).
@@ -283,7 +340,7 @@ export function battleScene(root, opts) {
   const applyRewardAndAdvance = (chosenRelicId) => {
     if (!state.rewardData) return;
     let newRun = { ...run };
-    newRun.gold = (newRun.gold || 0) + state.rewardData.gold;
+    addRunGold(newRun, state.rewardData.gold); // M2
     // Carry-over fields persisted to run state FIRST (so acquireRelic sees fresh HP)
     newRun.playerHp = state.player.hp;
     newRun.playerMaxHp = state.player.maxHp;
@@ -295,6 +352,17 @@ export function battleScene(root, opts) {
     newRun.relics = (newRun.relics || []).slice();
     if (chosenRelicId) {
       newRun = acquireRelic(newRun, chosenRelicId);
+    }
+    // M9: Bandit Ambush bonus relic auto-grants AFTER the player's elite pick.
+    // Clear the flag whether or not a bonus was actually rolled (e.g. pool
+    // exhausted), so the next elite battle doesn't carry it over.
+    if (newRun.banditAmbushPending) {
+      const bonus = state.rewardData.bonusBanditRelic;
+      if (bonus && !newRun.relics.some((r) => (r.id || r) === bonus.id)) {
+        newRun = acquireRelic(newRun, bonus.id);
+        console.log(`[mystery] bandit bonus relic granted: ${bonus.id}`);
+      }
+      newRun.banditAmbushPending = false;
     }
     newRun.energy = state.player.energy;
     newRun.momentumStacks = state.player.momentumStacks;
@@ -309,7 +377,7 @@ export function battleScene(root, opts) {
   const applyBossReward = (took) => {
     if (!state.rewardData) return;
     let newRun = { ...run };
-    newRun.gold = (newRun.gold || 0) + state.rewardData.gold;
+    addRunGold(newRun, state.rewardData.gold); // M2
     newRun.playerHp = state.player.hp;
     newRun.playerMaxHp = state.player.maxHp;
     const heal = healOnBattleWin(newRun);
@@ -319,7 +387,7 @@ export function battleScene(root, opts) {
       newRun = acquireRelic(newRun, state.rewardData.autoGrantedRelic.id);
     } else if (!took) {
       // SKIP compensation: +50 gold + heal +15 HP (capped at maxHp). Decision tension preserved.
-      newRun.gold = (newRun.gold || 0) + 50;
+      addRunGold(newRun, 50); // M2
       newRun.playerHp = Math.min(newRun.playerMaxHp, newRun.playerHp + 15);
     }
     newRun.energy = state.player.energy;
@@ -328,6 +396,9 @@ export function battleScene(root, opts) {
     newRun.readUses = state.readUsesRemaining;
     newRun.completed = true;
     setState({ run: newRun });
+    // M2: chapter-clear shard payout + unlock ch1Cleared flag (Ascension UI gate).
+    // CH1 is the only boss floor in v1 so isCh1BossClear is always true here.
+    state.runEndShards = payoutShards({ run: newRun, isCh1BossClear: true });
     state.bossRewardTaken = took ? "take" : "skip";
     render();
   };
@@ -379,7 +450,7 @@ export function battleScene(root, opts) {
     // 2.7c-2: Holy Water reduces enemy base dmg at elite/boss floors (min 1).
     const reduced = Math.max(1, baseDmg - holyWaterReduction(run, isEliteFloor || isBossFloor));
     if (action === "GUARD") return Math.floor(reduced * (1 - S.guard_dmg_reduction_pct / 100));
-    if (action === "COUNTER") return reduced + S.counter_loss_dmg_taken;
+    if (action === "COUNTER") return reduced + Math.max(0, S.counter_loss_dmg_taken - counterLossReduction);
     return reduced;
   };
 
@@ -485,7 +556,7 @@ export function battleScene(root, opts) {
       state.playerActed = false;  // no player pose (skip turn)
       state.enemyActed = true;    // enemy free hit pose
     } else if (action === "WILD") {
-      state.player.energy -= S.ws_cost;
+      state.player.energy -= wsCost;
       let dmg = S.ws_dmg;
       dmg = applyBerserkDealt(dmg);
       dmg = epicDealtMod(dmg); // 2.7c-3: Crown/Serpent apply to WILD too
@@ -499,7 +570,7 @@ export function battleScene(root, opts) {
       state.playerActed = true; // WILD = always attack pose
       state.enemyActed = true;  // WILD = enemy still hits
     } else if (action === "ULT") {
-      state.player.energy -= S.ult_cost;
+      state.player.energy -= ultCost;
       if (weapon.id === "sword") {
         let dmg = 25;
         dmg = applyBerserkDealt(dmg);
@@ -570,6 +641,7 @@ export function battleScene(root, opts) {
           // Live run snapshot so Berserker Stone sees the *current* battle HP.
           const liveRun = { ...run, playerHp: state.player.hp, playerMaxHp: state.player.maxHp };
           dmg += slashDmgBonus(liveRun);
+          dmg += slashForgeBonus; // M5b: Combat T1 forge upgrade (+1 SLASH dmg)
           // Crow Feather: +2 gold per SLASH win (tracked, paid in reward)
           state.slashWins += 1;
         }
@@ -597,8 +669,9 @@ export function battleScene(root, opts) {
           }
         }
 
-        // Combo 3+ bonus (Locks v1.2: +10%, was +50%)
-        if (state.player.comboCount >= 3) {
+        // Combo N+ bonus (Locks v1.2: +10%, was +50%).
+        // M5b: Combat T2 forge drops threshold from 3 -> 2.
+        if (state.player.comboCount >= comboThreshold) {
           dmg = Math.floor(dmg * 1.1);
         }
 
@@ -762,6 +835,10 @@ export function battleScene(root, opts) {
     } else if (state.player.hp <= 0) {
       state.ended = "lose";
       state.log.push("x DEFEAT x");
+      // M2: shard payout on death. Per §7.1, player keeps 20% of total gold
+      // earned as shards regardless of survival. Run-end overlay reads
+      // state.runEndShards to display the result.
+      state.runEndShards = payoutShards({ run, isCh1BossClear: false });
     } else {
       state.turn++;
       // Tick player buffs (berserk countdown)
@@ -850,9 +927,9 @@ export function battleScene(root, opts) {
       const enragedTag = state.enragedThisTurn ? ` <span class="b-intent__enraged">\u26A1 ENRAGED +50%</span>` : "";
       intentHtml = `INTENT: ${intentIcon} ${intent} -- <strong>${dmgText}</strong>${enragedTag}`;
     }
-    const ultCost = S.ult_cost;
+    // M5b: use forge-discounted costs (resolved at scene mount).
     const canUlt = !state.ended && state.player.energy >= ultCost;
-    const canWild = !state.ended && state.player.energy >= S.ws_cost;
+    const canWild = !state.ended && state.player.energy >= wsCost;
 
     // Player buff chips
     const playerBuffs = [];
@@ -913,11 +990,17 @@ export function battleScene(root, opts) {
     const noAnim = endOverlayShown ? "b-end--no-anim" : "";
     let endOverlay = "";
     if (state.ended === "lose") {
+      // M2: shard payout summary (set when state.ended flipped to "lose").
+      const lossShards = state.runEndShards || { shardsEarned: 0, ascMultiplier: 1.0 };
+      const lossShardLine = lossShards.shardsEarned > 0
+        ? `<div class="b-end__shards">\ud83d\udc8e +${lossShards.shardsEarned} shards earned</div>`
+        : `<div class="b-end__stats b-end__stats--muted">No shards earned (need gold to convert)</div>`;
       endOverlay = `
       <div class="b-end b-end--lose ${noAnim}">
         <div class="b-end__title">x GAME OVER x</div>
         <div class="b-end__sub">You fell to ${enemyDef.name} on Floor ${state.floor}/${state.floorMax}</div>
-        <div class="b-end__stats">Gold earned: ${run.gold || 0} - Relics: ${(run.relics || []).length}</div>
+        <div class="b-end__stats">Gold earned: ${run.totalGoldEarned || 0} - Relics: ${(run.relics || []).length}</div>
+        ${lossShardLine}
         <button class="btn btn--primary b-end__btn" data-action="end-back">BACK TO LOBBY</button>
       </div>`;
     } else if (state.ended === "win" && state.isBossFloor) {
@@ -965,12 +1048,23 @@ export function battleScene(root, opts) {
             <button class="btn btn--primary b-end__btn" data-action="boss-finish">CONNECT WALLET &amp; PLAY CH2</button>
             <button class="btn btn--secondary b-end__btn" data-action="boss-finish">BACK TO LOBBY</button>` : `
             <button class="btn btn--primary b-end__btn" data-action="boss-finish">RETURN TO LOBBY</button>`;
+        // M2: shard payout summary + Ascension-unlock celebration if applicable.
+        const bossShards = state.runEndShards || { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false };
+        const ascNote = bossShards.ascMultiplier > 1.0
+          ? ` <em class="b-end__stats--muted">(\u00d7${bossShards.ascMultiplier.toFixed(2)} Asc bonus)</em>`
+          : "";
+        const bossShardLine = `<div class="b-end__shards">\ud83d\udc8e +${bossShards.shardsEarned} shards earned${ascNote}</div>`;
+        const unlockBanner = bossShards.ch1Unlocked
+          ? `<div class="b-end__unlock">\ud83c\udf1f ASCENSION MODE UNLOCKED \u2014 try harder runs from the lobby!</div>`
+          : "";
         endOverlay = `
         <div class="b-end b-end--win b-end--complete ${noAnim}">
           <div class="b-end__title">${ctaTitle}</div>
           <div class="b-end__sub">${ctaSub}</div>
           <div class="b-end__stats">${tookText}</div>
-          <div class="b-end__stats">Final HP ${finalRun.playerHp}/${finalRun.playerMaxHp} -- Gold ${finalRun.gold || 0} -- Relics ${(finalRun.relics || []).length}</div>
+          <div class="b-end__stats">Final HP ${finalRun.playerHp}/${finalRun.playerMaxHp} -- Gold ${finalRun.totalGoldEarned || finalRun.gold || 0} -- Relics ${(finalRun.relics || []).length}</div>
+          ${bossShardLine}
+          ${unlockBanner}
           ${ctaButtons}
         </div>`;
       }
@@ -1002,6 +1096,7 @@ export function battleScene(root, opts) {
             <div class="b-reward__gold">+${rwd.gold} gold (total ${(run.gold || 0) + rwd.gold})</div>
           </div>
           <div class="b-reward__pick">ELITE DROP - PICK 1 RELIC</div>
+          ${rwd.bonusBanditRelic ? `<div class="b-reward__bonus">\ud83c\udff9 BANDIT BOUNTY: <strong>${rwd.bonusBanditRelic.name}</strong> (${(rwd.bonusBanditRelic.tier || "common").toUpperCase()}) -- auto-granted on confirm</div>` : ""}
           <div class="b-reward__relics">${relicCards}</div>
           <div class="b-reward__actions">
             <button class="btn btn--primary b-reward__confirm" data-action="confirm-relic" ${confirmDisabled}>${confirmLabel}</button>
@@ -1118,7 +1213,7 @@ export function battleScene(root, opts) {
         ${action("COUNTER", "COUNTER", S.counter_win_dmg, "GUARD")}
       </div>
       <button class="b-wild ${canWild ? "" : "b-wild--off"}" data-action="action" data-act="WILD" ${canWild ? "" : "disabled"}>
-        WILD STRIKE - <strong>${S.ws_dmg} dmg</strong>, ignores RPS, -50% taken - ${S.ws_cost}e
+        WILD STRIKE - <strong>${S.ws_dmg} dmg</strong>, ignores RPS, -50% taken - ${wsCost}e
       </button>
       <button class="b-read ${canRead ? "" : "b-read--off"}" data-action="action" data-act="READ" ${canRead ? "" : "disabled"}>
         \u{1F441} ${readLabel}
@@ -1326,6 +1421,8 @@ export function battleScene(root, opts) {
       state.showSurrenderConfirm = false;
       render();
     } else if (action === "surrender-yes") {
+      // M2: surrender still pays out shards per §7.1 ("regardless of survival").
+      payoutShards({ run, isCh1BossClear: false });
       mountScene("lobby", root);
     } else if (action === "end-back") {
       mountScene("lobby", root);

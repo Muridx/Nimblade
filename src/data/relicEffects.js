@@ -44,7 +44,11 @@ export function goldPerSlashWin(run) {
 // ---- Tempo ----
 // Extra energy regen per turn (added to S.energy_regen_per_turn).
 export function bonusEnergyPerTurn(run) {
-  return hasRelic(run, "quick_boots") ? 5 : 0;
+  let bonus = hasRelic(run, "quick_boots") ? 5 : 0;
+  // M9: Ancient Rune mystery event grants +1 regen / turn per attune
+  // (stacks if player ever hits multiple Rune events in one run).
+  if (run && run.runeEnergyBonus) bonus += run.runeEnergyBonus;
+  return bonus;
 }
 
 // ---- HP / sustain ----

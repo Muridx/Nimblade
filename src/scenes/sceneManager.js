@@ -6,6 +6,7 @@ import { campfireScene } from "./campfire.js";
 import { shopScene } from "./shop.js";
 import { treasureScene } from "./treasure.js";
 import { mapScene } from "./map.js";
+import { mysteryScene } from "./mystery.js";
 
 const scenes = {
   splash: splashScene,
@@ -16,6 +17,7 @@ const scenes = {
   shop: shopScene,
   treasure: treasureScene,
   map: mapScene,
+  mystery: mysteryScene,
 };
 
 let currentUnmount = null;

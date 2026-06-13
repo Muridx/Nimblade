@@ -4,6 +4,7 @@ import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import relicsData from "../data/relics.json" assert { type: "json" };
 import { acquireRelic } from "../data/relicEffects.js";
 import { renderRunInfoModalHTML } from "../ui/runInfoModal.js";
+import { forgeShopDiscount } from "../data/forgeEffects.js";
 
 /**
  * Shop scene (2.7b-3 v2): 2 commons + 1 rare + heal potion stepper.
@@ -39,22 +40,29 @@ function weightedPickWithoutReplacement(pool, n) {
   return picks;
 }
 
-function rollShopRelics() {
+function rollShopRelics(discount = 0) {
   const commons = relicsData.commons || [];
   const rares = relicsData.rares || [];
   const commonPicks = weightedPickWithoutReplacement(commons, 2);
   commonPicks.sort((a, b) => (COMMON_SUBTIER_RANK[b.subtier] || 0) - (COMMON_SUBTIER_RANK[a.subtier] || 0));
   const rarePicks = weightedPickWithoutReplacement(rares, 1);
+  // M5b: Economy T2 forge -- apply discount fraction to relic prices.
+  // Ceil + min 1g so 1g rare items can't be free-exploited.
+  const applyDisc = (p) => Math.max(1, Math.ceil(p * (1 - discount)));
   const items = [
-    ...commonPicks.map((r) => ({ kind: "relic", relic: r, price: COMMON_PRICE[r.subtier] || 30, sold: false })),
-    ...rarePicks.map((r) => ({ kind: "relic", relic: r, price: RARE_PRICE_BY_WEIGHT[r.weight] || 75, sold: false })),
+    ...commonPicks.map((r) => ({ kind: "relic", relic: r, price: applyDisc(COMMON_PRICE[r.subtier] || 30), sold: false })),
+    ...rarePicks.map((r) => ({ kind: "relic", relic: r, price: applyDisc(RARE_PRICE_BY_WEIGHT[r.weight] || 75), sold: false })),
   ];
   return items;
 }
 
 export function shopScene(root) {
+  // M5b: forge Economy T2 discount, resolved once at scene mount.
+  // (Discount applies to relic items only; potion is integer-gold-per-HP so
+  // it's left untouched for now to keep stepper math clean.)
+  const shopDiscount = forgeShopDiscount(getState().meta || {});
   const sceneState = {
-    items: rollShopRelics(),
+    items: rollShopRelics(shopDiscount),
     selectedIdx: null,
     potionHp: 0, // current stepper value
     showRunInfo: false, // 2.7d batch4: custom modal flag

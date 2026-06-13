@@ -4,6 +4,7 @@ import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import relicsData from "../data/relics.json" assert { type: "json" };
 import { acquireRelic } from "../data/relicEffects.js";
 import { renderRunInfoModalHTML } from "../ui/runInfoModal.js";
+import { forgeTreasurePicks } from "../data/forgeEffects.js";
 
 /**
  * Treasure scene (2.7b-4):
@@ -41,11 +42,13 @@ function rollTreasureRelics() {
 }
 
 export function treasureScene(root) {
+  // M5b: forge Economy T3 -- max picks goes from 1 -> 2 when forged.
+  const maxPicks = forgeTreasurePicks(getState().meta || {});
   const sceneState = {
     relics: rollTreasureRelics(),
     selectedIdx: null,
-    claimedIdx: null, // -1..2 once claimed; null = not yet
-    showRunInfo: false, // 2.7d batch4: custom modal flag
+    claimedIdxs: [],           // array of claimed indices (0..maxPicks length)
+    showRunInfo: false,
   };
 
   const advance = () => {
@@ -53,14 +56,17 @@ export function treasureScene(root) {
     mountScene("map", root);
   };
 
+  const allClaimed = () => sceneState.claimedIdxs.length >= maxPicks;
+
   const claim = (idx) => {
-    if (sceneState.claimedIdx !== null) return;
+    if (allClaimed()) return;
+    if (sceneState.claimedIdxs.includes(idx)) return;
     const r = sceneState.relics[idx];
     if (!r) return;
     const cur = getState().run || {};
     const newRun = acquireRelic(cur, r.id);
     setState({ run: newRun });
-    sceneState.claimedIdx = idx;
+    sceneState.claimedIdxs.push(idx);
     sceneState.selectedIdx = null;
     render();
   };
@@ -73,16 +79,22 @@ export function treasureScene(root) {
     const maxHp = cur.playerMaxHp || 100;
     const gold = cur.gold || 0;
 
-    const claimed = sceneState.claimedIdx !== null;
+    // M5b: support up to `maxPicks` claims (Economy T3 forge => 2).
+    const claimedAll = allClaimed();
+    const claimedSet = new Set(sceneState.claimedIdxs);
     const cards = sceneState.relics.map((r, idx) => {
       const subClass = `b-shop__card--${r.subtier}`;
-      const isClaimed = sceneState.claimedIdx === idx;
-      const isPassed = claimed && sceneState.claimedIdx !== idx;
+      const isClaimed = claimedSet.has(idx);
+      // A card is "passed" only once we've fully exhausted maxPicks and this
+      // one wasn't taken.
+      const isPassed = claimedAll && !isClaimed;
       const sel = sceneState.selectedIdx === idx ? "b-shop__card--selected" : "";
       const stateCls = isClaimed ? "b-treasure__card--claimed" : (isPassed ? "b-treasure__card--passed" : "");
       const badge = isClaimed ? "CLAIMED" : isPassed ? "PASSED" : r.subtier.toUpperCase();
+      // Disable: already claimed this card, or we've hit the limit.
+      const disabled = isClaimed || claimedAll;
       return `
-        <button class="b-shop__card ${subClass} ${sel} ${stateCls}" data-action="pick" data-idx="${idx}" ${claimed ? "disabled" : ""}>
+        <button class="b-shop__card ${subClass} ${sel} ${stateCls}" data-action="pick" data-idx="${idx}" ${disabled ? "disabled" : ""}>
           <div class="b-shop__card-tier">${badge}</div>
           <div class="b-shop__card-name">${r.name}</div>
           <div class="b-shop__card-desc">${r.description}</div>
@@ -90,12 +102,16 @@ export function treasureScene(root) {
         </button>`;
     }).join("");
 
-    const canClaim = !claimed && sceneState.selectedIdx !== null;
-    const claimLabel = claimed
-      ? "RELIC CLAIMED"
-      : sceneState.selectedIdx === null
-        ? "PICK A RELIC"
-        : "CLAIM (FREE)";
+    const canClaim = !claimedAll && sceneState.selectedIdx !== null && !claimedSet.has(sceneState.selectedIdx);
+    const claimedSoFar = sceneState.claimedIdxs.length;
+    let claimLabel;
+    if (claimedAll) {
+      claimLabel = maxPicks > 1 ? `RELICS CLAIMED (${claimedSoFar}/${maxPicks})` : "RELIC CLAIMED";
+    } else if (sceneState.selectedIdx === null) {
+      claimLabel = maxPicks > 1 ? `PICK A RELIC (${claimedSoFar}/${maxPicks} taken)` : "PICK A RELIC";
+    } else {
+      claimLabel = maxPicks > 1 ? `CLAIM (${claimedSoFar + 1}/${maxPicks})` : "CLAIM (FREE)";
+    }
 
     // 2.7d batch4: RUN INFO custom modal (same shell as battle scene).
     const buffsObj = cur.actionBuffs || {};
@@ -128,16 +144,16 @@ export function treasureScene(root) {
         <div class="node-stub__body b-shop__body">
           <div class="node-stub__icon">\u{1F4E6}</div>
           <div class="node-stub__title">TREASURE</div>
-          <div class="node-stub__desc">An old chest. 3 relics inside. You may take only ONE.</div>
+          <div class="node-stub__desc">An old chest. 3 relics inside. You may take ${maxPicks === 1 ? "only ONE" : `up to ${maxPicks}`}.</div>
 
-          <div class="b-shop__section-label">CHOOSE ONE</div>
+          <div class="b-shop__section-label">${maxPicks === 1 ? "CHOOSE ONE" : `CHOOSE UP TO ${maxPicks}`}</div>
           <div class="b-shop__grid">${cards}</div>
           <div class="b-shop__action-row">
             <button class="btn btn--primary" data-action="claim" ${canClaim ? "" : "disabled"}>${claimLabel}</button>
           </div>
 
           <div class="b-shop__action-row b-shop__action-row--leave">
-            <button class="btn ${claimed ? "btn--primary" : "btn--secondary"}" data-action="leave">${claimed ? "LEAVE" : "LEAVE EMPTY-HANDED"}</button>
+            <button class="btn ${claimedSoFar > 0 ? "btn--primary" : "btn--secondary"}" data-action="leave">${claimedSoFar > 0 ? "LEAVE" : "LEAVE EMPTY-HANDED"}</button>
           </div>
         </div>
         <div class="b-footer">
@@ -153,8 +169,9 @@ export function treasureScene(root) {
     if (!t) return;
     const a = t.dataset.action;
     if (a === "pick") {
-      if (sceneState.claimedIdx !== null) return;
+      if (allClaimed()) return;
       const idx = parseInt(t.dataset.idx, 10);
+      if (sceneState.claimedIdxs.includes(idx)) return;
       if (sceneState.relics[idx]) {
         sceneState.selectedIdx = idx;
         render();

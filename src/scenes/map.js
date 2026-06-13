@@ -36,6 +36,10 @@ const TYPE_ICON = {
   shop: "/assets/map_node_shop.png",
   campfire: "/assets/map_node_campfire.png",
   treasure: "/assets/map_node_treasure.png",
+  // M9: mystery reuses the treasure sprite for now -- visual distinction via
+  // CSS hue-rotate + "?" badge on the .map__node--mystery class. Murid can
+  // drop a dedicated map_node_mystery.png later and we'll just point here.
+  mystery: "/assets/map_node_treasure.png",
   // boss handled separately (per-chapter)
 };
 
@@ -46,6 +50,7 @@ const TYPE_LABEL = {
   shop: "Shop",
   campfire: "Campfire",
   treasure: "Treasure",
+  mystery: "Mystery",
   boss: "Boss",
 };
 
@@ -115,7 +120,7 @@ export function mapScene(root) {
       const action = isReachable ? `data-action="pick" data-node-id="${n.id}"` : "";
       const iconSrc = iconForNode(n, chapter);
       return `
-        <button class="map__node ${stateClass}"
+        <button class="map__node map__node--${n.type} ${stateClass}"
           style="left: ${pos.xPct}%; top: ${pos.y}px;"
           ${action}
           aria-label="${label} floor ${n.floor}">
@@ -244,6 +249,7 @@ export function mapScene(root) {
         shop: "shop",
         campfire: "campfire",
         treasure: "treasure",
+        mystery: "mystery",
       };
       const targetScene = sceneByType[node.type];
       if (targetScene) {

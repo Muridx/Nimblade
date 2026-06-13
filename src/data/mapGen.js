@@ -32,7 +32,13 @@ function pickFloorTypes(floor, rnd) {
       const wild = pick(["elite", "shop"], rnd);
       return shuffle(["normal", "normal", wild], rnd);
     }
-    case 4: return shuffle(["normal", "shop", "campfire"], rnd);
+    case 4: {
+      // M9: mystery placement per design doc §6.3. Floor 4 swaps the
+      // campfire slot for a mystery/campfire pick (50/50) so the player gets
+      // an extra "gamble" decision early in the run.
+      const wild = pick(["mystery", "campfire"], rnd);
+      return shuffle(["normal", "shop", wild], rnd);
+    }
     case 5: {
       const wild = pick(["shop", "campfire"], rnd);
       return shuffle(["normal", "treasure", wild], rnd);
@@ -42,7 +48,9 @@ function pickFloorTypes(floor, rnd) {
       return shuffle(["normal", "elite", wild], rnd);
     }
     case 7: {
-      const wild = pick(["treasure", "normal"], rnd);
+      // M9: mystery/elite choice per design §6.3 -- floor 7 gives a 3-way
+      // wild slot (mystery|treasure|normal) on top of the 2 guaranteed elites.
+      const wild = pick(["mystery", "treasure", "normal"], rnd);
       return shuffle(["elite", "elite", wild], rnd);
     }
     case 8: return ["campfire", "campfire"];
@@ -163,12 +171,24 @@ function reachableToBoss(nodes) {
   return false;
 }
 
-function buildOneMap(rnd) {
+function buildOneMap(rnd, ascLevel) {
   const nodes = [];
   const nodesByFloor = {};
+  const asc = Math.max(0, Math.min(5, Number(ascLevel) || 0));
 
   for (let floor = 1; floor <= 9; floor++) {
-    const types = pickFloorTypes(floor, rnd);
+    let types = pickFloorTypes(floor, rnd);
+    // M6 (Asc 2+): elite spawn rate +50%. We inject ONE extra guaranteed elite
+    // by swapping a "normal" slot for an "elite" slot on floor 4 (which
+    // normally has zero elites). Net effect: ~+1 elite per run on top of the
+    // baseline ~2-3, ≈ +50% over the long run.
+    if (asc >= 2 && floor === 4) {
+      const idx = types.indexOf("normal");
+      if (idx !== -1) {
+        types = types.slice();
+        types[idx] = "elite";
+      }
+    }
     const floorNodes = types.map((type, col) => ({
       id: `f${floor}_c${col}`,
       floor,
@@ -191,11 +211,11 @@ function buildOneMap(rnd) {
  * generateMap -- main entry.
  * Returns { nodes, startId, bossId } or throws if no valid map after 20 retries.
  */
-export function generateMap(seed) {
+export function generateMap(seed, ascLevel) {
   const rnd = seed != null ? mulberry32(seed) : Math.random;
 
   for (let attempt = 0; attempt < 20; attempt++) {
-    const nodes = buildOneMap(rnd);
+    const nodes = buildOneMap(rnd, ascLevel);
     if (reachableToBoss(nodes)) {
       const start = nodes.find((n) => n.type === "start");
       const boss = nodes.find((n) => n.type === "boss");
@@ -208,7 +228,7 @@ export function generateMap(seed) {
   }
   // Failsafe: should never hit with our gen rules, but log if so.
   console.warn("[mapGen] failed to generate reachable map after 20 attempts");
-  const nodes = buildOneMap(rnd);
+  const nodes = buildOneMap(rnd, ascLevel);
   return {
     nodes,
     startId: nodes.find((n) => n.type === "start").id,
