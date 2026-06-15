@@ -172,8 +172,8 @@ const SPECIALS = {
     cooldown: 3,
     skipsAttack: true,
     execute(ss, ctx) {
-      ctx.dealDirectDmg(15, "ignores guard");
-      ctx.log("Enemy triggers AVALANCHE — 15 damage (ignores guard)!");
+      ctx.dealDirectDmg(7, "ignores guard");
+      ctx.log("Enemy triggers AVALANCHE — 7 damage (ignores guard)!");
     },
   },
 

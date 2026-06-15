@@ -10,7 +10,7 @@
       { "id": "cave_troll",     "name": "Cave Troll",     "tier": "normal", "hp": 50, "dmg": 12, "honest_pct": 80, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],  "special": "stone_skin",   "role": "-3 dmg taken 2t" }
     ],
     "elites": [
-      { "id": "frost_giant",    "name": "Frost Giant",    "tier": "elite", "hp": 65, "dmg": 14, "honest_pct": 55, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],          "special": "avalanche",  "role": "15 dmg ignore guard" },
+      { "id": "frost_giant",    "name": "Cave Golem",     "sprite_id": "rock_golem", "tier": "elite", "hp": 65, "dmg": 14, "honest_pct": 55, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],          "special": "avalanche",  "role": "Boulder slam — 7 dmg ignore guard" },
       { "id": "bandit_captain", "name": "Bandit Captain", "tier": "elite", "hp": 55, "dmg": 11, "honest_pct": 50, "pattern": ["GUARD","COUNTER","SLASH","COUNTER"],        "special": "steal_gold", "role": "Steal 10g on hit" }
     ],
     "boss": { "id": "goblin_king", "name": "Goblin King", "tier": "boss", "hp": 80, "dmg": 12, "honest_pct": 45, "scheme_every": 3, "pattern": ["SLASH","COUNTER","COUNTER","GUARD","SLASH","COUNTER"], "special": "war_cry", "role": "CH1 boss — war_cry +4 dmg 2t" }
@@ -22,14 +22,14 @@
       { "id": "ice_wolf",    "name": "Ice Wolf",    "tier": "normal", "hp": 45, "dmg": 10, "honest_pct": 65, "pattern": ["COUNTER","COUNTER","SLASH"],          "special": "freeze",      "role": "Skip player turn" },
       { "id": "dark_miner",  "name": "Dark Miner",  "tier": "normal", "hp": 50, "dmg": 9,  "honest_pct": 70, "pattern": ["GUARD","SLASH","SLASH"],              "special": "plate_armor", "role": "-4 dmg taken 2t" },
       { "id": "mine_bat",    "name": "Mine Bat",    "tier": "normal", "hp": 30, "dmg": 11, "honest_pct": 60, "pattern": ["COUNTER","SLASH"],                    "special": "screech",     "role": "Screech debuff" },
-      { "id": "frost_golem", "name": "Frost Golem", "tier": "normal", "hp": 60, "dmg": 8,  "honest_pct": 75, "pattern": ["GUARD","GUARD","SLASH","COUNTER"],    "special": "ice_shield",  "role": "Ice shield buff" },
-      { "id": "snow_bandit", "name": "Snow Bandit", "tier": "normal", "hp": 40, "dmg": 12, "honest_pct": 55, "pattern": ["SLASH","SLASH","COUNTER"],            "special": "ambush",      "role": "Ambush attack" }
+      { "id": "frost_golem", "sprite_id": "ice_golem", "name": "Frost Golem", "tier": "normal", "hp": 60, "dmg": 8,  "honest_pct": 75, "pattern": ["GUARD","GUARD","SLASH","COUNTER"],    "special": "ice_shield",  "role": "Ice shield buff" },
+      { "id": "snow_bandit", "sprite_id": "bandit_scout", "name": "Snow Bandit", "tier": "normal", "hp": 40, "dmg": 12, "honest_pct": 55, "pattern": ["SLASH","SLASH","COUNTER"],            "special": "ambush",      "role": "Ambush attack" }
     ],
     "elites": [
-      { "id": "frost_giant_ch2",    "name": "Frost Giant",    "tier": "elite", "hp": 75, "dmg": 15, "honest_pct": 50, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],          "special": "avalanche",  "role": "15 dmg ignore guard (CH2 ver)" },
-      { "id": "bandit_captain_ch2", "name": "Bandit Captain", "tier": "elite", "hp": 65, "dmg": 13, "honest_pct": 45, "pattern": ["GUARD","COUNTER","SLASH","COUNTER"],        "special": "steal_gold", "role": "Steal 10g on hit (CH2 ver)" }
+      { "id": "frost_giant_ch2", "sprite_id": "frost_giant",    "name": "Frost Giant",    "tier": "elite", "hp": 75, "dmg": 15, "honest_pct": 50, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],          "special": "avalanche",  "role": "7 dmg ignore guard (CH2 ver)" },
+      { "id": "bandit_captain_ch2", "sprite_id": "bandit_captain", "name": "Bandit Captain", "tier": "elite", "hp": 65, "dmg": 13, "honest_pct": 45, "pattern": ["GUARD","COUNTER","SLASH","COUNTER"],        "special": "steal_gold", "role": "Steal 10g on hit (CH2 ver)" }
     ],
-    "miniboss": { "id": "hooded_sister", "name": "Hooded Sister", "tier": "miniboss", "hp": 110, "dmg": 14, "honest_pct": 60, "pattern": ["COUNTER","GUARD","SLASH","COUNTER","GUARD"], "special": "scrying", "role": "CH2 miniboss — reads player intent" },
+    "miniboss": { "id": "hooded_sister", "sprite_id": "frost_witch", "name": "Hooded Sister", "tier": "miniboss", "hp": 110, "dmg": 14, "honest_pct": 60, "pattern": ["COUNTER","GUARD","SLASH","COUNTER","GUARD"], "special": "scrying", "role": "CH2 miniboss — reads player intent" },
     "boss": { "id": "ice_queen", "name": "Ice Queen", "tier": "boss", "hp": 120, "dmg": 14, "honest_pct": 40, "scheme_every": 3, "pattern": ["SLASH","COUNTER","GUARD","COUNTER","SLASH","GUARD"], "special": "blizzard", "role": "CH2 boss — blizzard -10e +5 dmg" }
   },
   "ch3": {
@@ -37,16 +37,16 @@
     "background": "bg_ch3_vampire_court.png",
     "normals": [
       { "id": "vampire_bat",     "name": "Vampire Bat",     "tier": "normal", "hp": 40, "dmg": 11, "honest_pct": 60, "pattern": "random",                              "special": "blood_sip",   "role": "Heal 5 HP on hit" },
-      { "id": "skeleton_knight", "name": "Skeleton Knight", "tier": "normal", "hp": 55, "dmg": 13, "honest_pct": 65, "pattern": ["SLASH","GUARD","SLASH"],              "special": "bone_shield", "role": "Bone shield buff" },
-      { "id": "ghost",           "name": "Ghost",           "tier": "normal", "hp": 35, "dmg": 14, "honest_pct": 55, "pattern": ["COUNTER","COUNTER","SLASH"],          "special": "phase_shift", "role": "Phase shift dodge" },
-      { "id": "dark_witch",      "name": "Dark Witch",      "tier": "normal", "hp": 45, "dmg": 12, "honest_pct": 50, "pattern": ["COUNTER","COUNTER","SLASH"],          "special": "curse",       "role": "Curse debuff" },
-      { "id": "gargoyle",        "name": "Gargoyle",        "tier": "normal", "hp": 65, "dmg": 10, "honest_pct": 70, "pattern": ["GUARD","GUARD","SLASH","COUNTER"],    "special": "stone_form",  "role": "Stone form -dmg taken" }
+      { "id": "skeleton_knight", "sprite_id": "thrall_knight", "name": "Skeleton Knight", "tier": "normal", "hp": 55, "dmg": 13, "honest_pct": 65, "pattern": ["SLASH","GUARD","SLASH"],              "special": "bone_shield", "role": "Bone shield buff" },
+      { "id": "ghost", "sprite_id": "dark_specter",           "name": "Ghost",           "tier": "normal", "hp": 35, "dmg": 14, "honest_pct": 55, "pattern": ["COUNTER","COUNTER","SLASH"],          "special": "phase_shift", "role": "Phase shift dodge" },
+      { "id": "dark_witch", "sprite_id": "vampire_mage",      "name": "Dark Witch",      "tier": "normal", "hp": 45, "dmg": 12, "honest_pct": 50, "pattern": ["COUNTER","COUNTER","SLASH"],          "special": "curse",       "role": "Curse debuff" },
+      { "id": "gargoyle", "sprite_id": "stone_sentinel",        "name": "Gargoyle",        "tier": "normal", "hp": 65, "dmg": 10, "honest_pct": 70, "pattern": ["GUARD","GUARD","SLASH","COUNTER"],    "special": "stone_form",  "role": "Stone form -dmg taken" }
     ],
     "elites": [
       { "id": "shadow_king",  "name": "Shadow King",  "tier": "elite", "hp": 85, "dmg": 16, "honest_pct": 45, "pattern": ["SLASH","SLASH","COUNTER","GUARD","COUNTER"], "special": "shadow_clone", "role": "50% dodge 2t" },
       { "id": "vampire_lord", "name": "Vampire Lord", "tier": "elite", "hp": 75, "dmg": 14, "honest_pct": 40, "pattern": ["COUNTER","SLASH","COUNTER","GUARD"],         "special": "blood_drain", "role": "Heal 8 HP on hit" }
     ],
-    "miniboss": { "id": "renfield", "name": "Renfield", "tier": "miniboss", "hp": 130, "dmg": 11, "honest_pct": 60, "pattern": ["SLASH","GUARD","COUNTER","SLASH","GUARD"], "special": "summon_bats", "role": "CH3 miniboss — summon bats 3 dmg/t 3t" },
+    "miniboss": { "id": "renfield", "sprite_id": "ruin_wraith", "name": "Renfield", "tier": "miniboss", "hp": 130, "dmg": 11, "honest_pct": 60, "pattern": ["SLASH","GUARD","COUNTER","SLASH","GUARD"], "special": "summon_bats", "role": "CH3 miniboss — summon bats 3 dmg/t 3t" },
     "boss": { "id": "count_dracula", "name": "Count Dracula", "tier": "boss", "hp": 150, "dmg": 15, "honest_pct": 35, "scheme_every": 3, "pattern": ["SLASH","COUNTER","COUNTER","GUARD","SLASH","COUNTER","SLASH"], "special": "blood_curse", "role": "CH3 boss — blood curse +1 taken/stack" }
   }
 }

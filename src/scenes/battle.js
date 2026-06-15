@@ -1788,7 +1788,7 @@ export function battleScene(root, opts) {
               <div class="b-bar"><div class="b-bar__fill b-bar__fill--eng" style="width:${pEngPct}%"></div><span class="b-bar__text">ENG ${state.player.energy}/${state.player.maxEnergy}</span></div>
               <div class="b-buffs">BUFFS: ${playerBuffsHtml}</div>
             </div>
-            <div class="b-sprite ${playerDyingClass}" style="background-image:url('/assets/${playerIdleSprite}.png')"></div>
+            <div class="b-sprite ${playerDyingClass}"><img class="b-sprite__img" src="/assets/${playerIdleSprite}.png" alt="" draggable="false"></div>
           </div>
           <div class="b-side b-side--enemy">
             <div class="b-side__info">
@@ -1798,7 +1798,7 @@ export function battleScene(root, opts) {
               ${foresightHtml}
               <div class="b-buffs">BUFFS: ${enemyBuffsHtml}</div>
             </div>
-            <div class="b-sprite ${enemyDyingClass}" style="background-image:url('/assets/${spriteId}.png')"></div>
+            <div class="b-sprite ${enemyDyingClass}"><img class="b-sprite__img" src="/assets/${spriteId}.png" alt="" draggable="false"></div>
           </div>
         </div>
         <div class="b-mid b-mid--2col">
@@ -1835,11 +1835,22 @@ export function battleScene(root, opts) {
   const swapSprite = (sel, newUrl, ms = 1800) => {
     const el = root.querySelector(sel);
     if (!el) return;
-    const orig = el.style.backgroundImage;
-    el.style.backgroundImage = `url('${newUrl}')`;
+    const img = el.querySelector(".b-sprite__img");
+    if (!img) return;
+    // Swap to the attack/action pose. The pose PNG is wider than idle, so with
+    // CSS `.b-sprite__img { width:auto; max-width:none }` + overflow:visible it
+    // spills out of the slot onto the enemy (intentional "lunge"). Raise the
+    // attacking side above the other so the overflow paints on top.
+    const orig = img.getAttribute("src");
+    const side = el.closest(".b-side");
+    img.src = newUrl;
+    if (side) side.classList.add("b-side--attacking");
     setTimeout(() => {
       // only revert if same element still in DOM
-      if (el.isConnected) el.style.backgroundImage = orig;
+      if (img.isConnected) {
+        img.src = orig;
+        if (side) side.classList.remove("b-side--attacking");
+      }
     }, ms);
   };
 

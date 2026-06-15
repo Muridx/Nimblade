@@ -136,6 +136,7 @@ export function weaponSelectScene(root) {
             <span>${w.weapon_skill.name.toUpperCase()}</span><strong>${w.stats.ws_cost}e</strong>
           </div>
           <div class="ws__passive"><strong>${w.passive.name}:</strong> ${w.passive.description}</div>
+          <div class="ws__skill"><strong>SKILL - ${w.weapon_skill.name} (${w.stats.ws_cost}e):</strong> ${w.weapon_skill.description}</div>
           <div class="ws__ult"><strong>ULT - ${w.ultimate.name} (${w.ultimate.cost}):</strong> ${w.ultimate.description}</div>
         </div>
         ${ctaHTML}

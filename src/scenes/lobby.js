@@ -78,6 +78,10 @@ let dailyClaiming = false;
 let dailyClaimResult = null;
 let dailyAutoShownFor = null;
 
+// P3d: How to Play modal. Pure-static tutorial content -> only needs a
+// visible flag. Reset on scene mount like the other modals.
+let howtoOpen = false;
+
 // M4: branch metadata for forge modal layout. Ordered left->right.
 const FORGE_BRANCHES = [
   { key: "survival",  icon: "\u2764\ufe0f", label: "SURVIVAL"  },
@@ -100,6 +104,7 @@ export function lobbyScene(root) {
   dailyOpen = false;
   dailyClaiming = false;
   dailyClaimResult = null;
+  howtoOpen = false;
   render(root);
   // Fire-and-forget daily status refresh if wallet connected. Triggers a
   // re-render to show the "!" badge + auto-popup the modal once per day.
@@ -354,6 +359,24 @@ export function lobbyScene(root) {
       showToast(root, "\u2699\ufe0f SETTINGS", "Display name lives inside LEADERBOARD for now. Audio toggle + reset progress + about screen ship in the next polish pass (P3c).");
       return;
     }
+
+    // P3d: How to Play modal handlers.
+    //   open-howto  -> show tutorial overlay
+    //   howto-close -> X button or backdrop tap dismisses
+    //   howto-stop  -> swallow taps inside the card (so backdrop dismiss works)
+    if (action === "open-howto") {
+      howtoOpen = true;
+      render(root);
+      return;
+    }
+    if (action === "howto-close") {
+      howtoOpen = false;
+      render(root);
+      return;
+    }
+    if (action === "howto-stop") {
+      return; // swallow clicks inside the modal card
+    }
   };
 
   root.addEventListener("click", onClick);
@@ -414,6 +437,8 @@ function render(root) {
   const lbModalHTML = lbOpen ? renderLeaderboardModalHTML() : "";
   // P3b: daily login modal.
   const dailyModalHTML = dailyOpen ? renderDailyModalHTML(meta) : "";
+  // P3d: How to Play overlay -- static tutorial, no data deps.
+  const howtoModalHTML = howtoOpen ? renderHowToModalHTML() : "";
 
   // P3b: daily login pill. Sits between SHARDS and WALLET in the top bar.
   //   - Wallet not connected -> hidden entirely (no point teasing).
@@ -469,6 +494,13 @@ function render(root) {
       </div>
 
       <div class="lobby__menu">
+        <div class="lobby__card lobby__card--wide lobby__card--howto" role="button" tabindex="0" data-action="open-howto">
+          <div class="lobby__card-icon">\ud83d\udcd6</div>
+          <div class="lobby__card-howto-text">
+            <div class="lobby__card-label">HOW TO PLAY</div>
+            <div class="lobby__card-sub">New here? Learn the duel in 2 min</div>
+          </div>
+        </div>
         <div class="lobby__card" role="button" tabindex="0" data-action="open-forge">
           <div class="lobby__card-icon">\u2692\ufe0f</div>
           <div class="lobby__card-label">FORGE</div>
@@ -510,6 +542,7 @@ function render(root) {
       ${ascModalHTML}
       ${lbModalHTML}
       ${dailyModalHTML}
+      ${howtoModalHTML}
     </div>
   `;
 }
@@ -687,6 +720,76 @@ function renderDailyModalHTML(meta) {
         ${ctaHTML}
         <div class="daily__hint">Miss a day \u2192 streak resets to Day 1.</div>
         <div class="daily__footer">Server-verified \u00b7 one claim per UTC day \u00b7 wallet-only.</div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * P3d: Render the HOW TO PLAY modal. Pure-static onboarding tutorial -- the
+ * single biggest new-player retention lever (sim showed skill >> ascension,
+ * and the bluff "feels like luck" until a player learns it's pattern-based).
+ * Reuses the forge__overlay / forge__card scaffolding (scrollable, max 90vh)
+ * so the CSS surface stays tiny. Backdrop tap or X closes it.
+ */
+function renderHowToModalHTML() {
+  return `
+    <div class="lobby__toast forge__overlay" data-action="howto-close">
+      <div class="forge__card htp__card" data-action="howto-stop">
+        <div class="forge__header">
+          <div class="forge__title">\ud83d\udcd6 HOW TO PLAY</div>
+          <button class="forge__close" data-action="howto-close" aria-label="Close">\u00d7</button>
+        </div>
+
+        <div class="htp__body">
+          <p class="htp__lead">NIMBLADE is a roguelite duel. Climb through 3 chapters of enemies, beat the boss at the end of each, and reach the top. You have one life per run \u2014 lose all your HP and the run ends. But you always keep your <strong>Shards</strong> to grow stronger for next time.</p>
+
+          <div class="htp__h">\u2694\ufe0f The Duel \u2014 Rock, Paper, Scissors</div>
+          <p>Every turn you and your enemy each pick one move. They clash like rock-paper-scissors:</p>
+          <div class="htp__rps">
+            <div class="htp__rps-row"><span>\u2694\ufe0f SLASH</span><span class="htp__beats">beats</span><span>\ud83c\udf00 COUNTER</span></div>
+            <div class="htp__rps-row"><span>\ud83d\udee1\ufe0f GUARD</span><span class="htp__beats">beats</span><span>\u2694\ufe0f SLASH</span></div>
+            <div class="htp__rps-row"><span>\ud83c\udf00 COUNTER</span><span class="htp__beats">beats</span><span>\ud83d\udee1\ufe0f GUARD</span></div>
+          </div>
+          <p>Same move = a draw, nobody takes damage. <strong>Win the clash and you deal damage; lose it and you take damage.</strong> It all comes down to out-guessing your opponent.</p>
+
+          <div class="htp__h">\ud83d\udc41\ufe0f Reading Your Enemy</div>
+          <p>Above the enemy you'll see its <strong>INTENT</strong> \u2014 the move it plans to make. But beware: enemies <strong>bluff</strong>. A sneaky enemy shows a fake intent to bait you, and tougher enemies lie more often. Two ways to beat the bluff:</p>
+          <ul class="htp__list">
+            <li><strong>\ud83d\udd0e READ</strong> (costs 60 energy) \u2014 reveals the enemy's TRUE move this turn.</li>
+            <li><strong>Learn the PATTERN</strong> \u2014 every enemy follows a fixed sequence of moves. Watch a few turns and you'll predict them even when they bluff. <em>This is the real skill of NIMBLADE.</em></li>
+          </ul>
+
+          <div class="htp__h">\u26a1 Energy, Skills &amp; Ultimate</div>
+          <p>You gain 20 energy each turn (max 100). Spend it on:</p>
+          <ul class="htp__list">
+            <li><strong>READ</strong> (60) \u2014 see the true intent.</li>
+            <li><strong>Weapon SKILL</strong> (30\u201340) \u2014 a special guaranteed move.</li>
+            <li><strong>ULTIMATE</strong> (100) \u2014 your most powerful attack.</li>
+          </ul>
+
+          <div class="htp__h">\ud83d\udca1 Example 1 \u2014 a real turn</div>
+          <div class="htp__ex">The enemy shows \ud83d\udee1\ufe0f GUARD. Your instinct might be to SLASH \u2014 but GUARD beats SLASH, so you'd lose! Instead you play \ud83c\udf00 COUNTER, because COUNTER beats GUARD. You win the clash and deal damage. If you're not sure the GUARD is honest, spend 60 energy on \ud83d\udd0e READ first to see the truth before you commit.</div>
+
+          <div class="htp__h">\ud83d\udca1 Example 2 \u2014 using the pattern</div>
+          <div class="htp__ex">Say the Cave Troll always cycles SLASH \u2192 SLASH \u2192 GUARD \u2192 COUNTER, then repeats. Once you spot it, you know turn 3 is GUARD \u2014 so you throw COUNTER and win, no READ needed. Now you can save your energy for your Ultimate. Reading patterns turns "luck" into a sure thing.</div>
+
+          <div class="htp__h">\ud83d\udddd\ufe0f Weapons</div>
+          <p>You start with the <strong>SWORD</strong> (balanced). Completing challenges unlocks the <strong>SPEAR</strong> (counter master), <strong>AXE</strong> (heavy hitter), and <strong>STAFF</strong> (magic &amp; healing). Each weapon has its own Skill and Ultimate.</p>
+
+          <div class="htp__h">\ud83d\udc8d Relics</div>
+          <p>Scattered through the map are <strong>Relics</strong> \u2014 permanent bonuses for the run (extra damage, gold, healing, energy and more). Grab them whenever you can; stacking relics is how you snowball into a powerful build.</p>
+
+          <div class="htp__h">\ud83d\uddfa\ufe0f The Map</div>
+          <p>Between fights you choose your path: \u2694\ufe0f battles, \ud83d\uded2 shops (spend gold), \ud83d\udd25 campfires (heal), \ud83d\udc8e treasure, and \u2753 mystery events. Plan your route \u2014 there's no single right way up.</p>
+
+          <div class="htp__h">\ud83c\udf1f After the Run</div>
+          <p>Win or lose, you earn <strong>Shards</strong>. Spend them in the <strong>FORGE</strong> for permanent upgrades that carry across every run. Want a tougher challenge with bigger rewards? Raise your <strong>ASCENSION</strong> level.</p>
+
+          <div class="htp__tip">NIMBLADE isn't about luck \u2014 it's about reading your opponent. Lose a fight? You weren't unlucky, you got out-read. Watch the patterns, manage your energy, and you'll climb higher every run. Good luck! \u2694\ufe0f</div>
+        </div>
+
+        <button class="btn btn--primary htp__got" data-action="howto-close">GOT IT</button>
       </div>
     </div>
   `;
