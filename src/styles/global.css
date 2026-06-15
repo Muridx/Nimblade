@@ -32,7 +32,7 @@ body {
 }
 .splash__logo {
   width: min(70vw, 480px); height: min(28vw, 180px);
-  background-image: url("/assets/logo_nimblade.png");
+  background-image: url("");
   background-size: contain; background-position: center; background-repeat: no-repeat;
   filter: drop-shadow(0 6px 24px rgba(0,0,0,0.7));
 }
