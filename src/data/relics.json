@@ -10,7 +10,11 @@
     { "id": "torch",         "name": "Torch",         "tier": "common", "subtier": "standard", "weight": 3, "effect_id": "torch",         "description": "See enemy exact HP number." },
     { "id": "quick_boots",   "name": "Quick Boots",   "tier": "common", "subtier": "standard", "weight": 3, "effect_id": "quick_boots",   "description": "+5 energy per round." },
     { "id": "insight_charm", "name": "Charm of Insight", "tier": "common", "subtier": "strong", "weight": 1, "effect_id": "insight_charm", "description": "First turn of each battle: intent always honest." },
-    { "id": "healing_herb",  "name": "Healing Herb",  "tier": "common", "subtier": "strong",   "weight": 1, "effect_id": "healing_herb",  "description": "Heal 3 HP at end of each battle." }
+    { "id": "healing_herb",  "name": "Healing Herb",  "tier": "common", "subtier": "strong",   "weight": 1, "effect_id": "healing_herb",  "description": "Heal 3 HP at end of each battle." },
+    { "id": "counterweight",  "name": "Counterweight",  "tier": "common", "subtier": "standard", "weight": 3, "effect_id": "counterweight",  "description": "COUNTER win dmg +2." },
+    { "id": "parry_stud",     "name": "Parry Stud",     "tier": "common", "subtier": "standard", "weight": 3, "effect_id": "parry_stud",     "description": "GUARD win dmg +2 (you bash back on a successful guard)." },
+    { "id": "trail_rations",  "name": "Trail Rations",  "tier": "common", "subtier": "standard", "weight": 3, "effect_id": "trail_rations",  "description": "Heal 4 HP each time you enter a new floor." },
+    { "id": "coin_pouch",     "name": "Coin Pouch",     "tier": "common", "subtier": "junk",     "weight": 5, "effect_id": "coin_pouch",     "description": "+3 gold per battle won." }
   ],
   "rares": [
     { "id": "vampire_fang",     "name": "Vampire Fang",     "tier": "rare", "subtier": "utility",      "weight": 4, "effect_id": "vampire_fang",     "description": "+2 HP lifesteal on SLASH win." },
@@ -19,12 +23,15 @@
     { "id": "phoenix_ember",    "name": "Phoenix Ember",    "tier": "rare", "subtier": "utility",      "weight": 4, "effect_id": "phoenix_ember",    "description": "1x/battle: when HP drops below 20%, heal 15 HP." },
     { "id": "berserker_stone",  "name": "Berserker Stone",  "tier": "rare", "subtier": "risk_reward",  "weight": 3, "effect_id": "berserker_stone",  "description": "SLASH dmg +5, BUT +2 self-dmg/round for first 5 rounds." },
     { "id": "mirror_shield",    "name": "Mirror Shield",    "tier": "rare", "subtier": "risk_reward",  "weight": 3, "effect_id": "mirror_shield",    "description": "GUARD win reflects 50% incoming dmg back." },
-    { "id": "time_glass",       "name": "Time Glass",       "tier": "rare", "subtier": "skill_check",  "weight": 3, "effect_id": "time_glass",       "description": "1x/battle: re-pick action knowing enemy move (guaranteed RPS win) BUT dmg dealt 50%." },
+    { "id": "time_glass",       "name": "Time Glass",       "tier": "rare", "subtier": "skill_check",  "weight": 3, "effect_id": "time_glass",       "description": "First 2 turns of each battle: enemy intent is always honest." },
     { "id": "gamblers_dice",    "name": "Gamblers Dice",    "tier": "rare", "subtier": "risk_reward",  "weight": 3, "effect_id": "gamblers_dice",    "description": "+30 energy each battle start, BUT -10 max HP for run." },
     { "id": "iron_will",        "name": "Iron Will",        "tier": "rare", "subtier": "boss_tool",    "weight": 3, "effect_id": "iron_will",        "description": "1x/battle: ignore one boss SCHEME (treat as honest)." },
     { "id": "chained_grimoire", "name": "Chained Grimoire", "tier": "rare", "subtier": "counter_build","weight": 3, "effect_id": "chained_grimoire", "description": "COUNTER dmg +6, BUT lose 5 energy per turn." },
     { "id": "runic_compass",    "name": "Runic Compass",    "tier": "rare", "subtier": "scouting",     "weight": 3, "effect_id": "runic_compass",    "description": "Reveal next 2 floor node types on map. (map UI soon)" },
-    { "id": "holy_water",       "name": "Holy Water",       "tier": "rare", "subtier": "anti_heal",    "weight": 1, "effect_id": "holy_water",       "description": "1x/battle: disable monster healing for 3 turns." }
+    { "id": "holy_water",       "name": "Holy Water",       "tier": "rare", "subtier": "anti_heal",    "weight": 1, "effect_id": "holy_water",       "description": "1x/battle: disable monster healing for 3 turns." },
+    { "id": "momentum_coil",    "name": "Momentum Coil",    "tier": "rare", "subtier": "risk_reward",  "weight": 3, "effect_id": "momentum_coil",    "description": "+1 dmg per consecutive RPS win this battle (max +5). Resets on any draw or loss." },
+    { "id": "frost_lattice",    "name": "Frost Lattice",    "tier": "rare", "subtier": "utility",      "weight": 4, "effect_id": "frost_lattice",    "description": "20% chance on GUARD win to freeze the enemy (skip its next turn)." },
+    { "id": "ethereal_edge",    "name": "Ethereal Edge",    "tier": "rare", "subtier": "boss_tool",    "weight": 3, "effect_id": "ethereal_edge",    "description": "Your attacks ignore 50% of enemy armor." }
   ],
   "epics": [
     { "id": "devils_bargain",    "name": "Devil's Bargain",   "tier": "epic", "subtier": "deal_with_devil", "weight": 3, "effect_id": "devils_bargain",    "description": "+30 max HP for run, BUT -2 self-dmg per SLASH win." },
@@ -34,7 +41,10 @@
     { "id": "crown_of_decision", "name": "Crown of Decision", "tier": "epic", "subtier": "double_stake",    "weight": 2, "effect_id": "crown_of_decision", "description": "Every 3rd turn = Crown Turn: ALL dmg x1.5 both sides. Intent uses chapter honesty (can lie)." },
     { "id": "eye_of_omniscience","name": "Eye of Omniscience","tier": "epic", "subtier": "opener_info",     "weight": 2, "effect_id": "eye_of_omniscience","description": "First 2 turns of battle: intent always honest. Enemy +10% dmg whole battle." },
     { "id": "void_crown",        "name": "Void Crown",        "tier": "epic", "subtier": "read_synergy",    "weight": 2, "effect_id": "void_crown",        "description": "READ action: -20 energy cost, reveals next 2 intents honest. Next attack after READ +10% dmg IF you win the RPS exchange." },
-    { "id": "heart_of_nimblade", "name": "Heart of Nimblade", "tier": "epic", "subtier": "legendary_save",  "weight": 1, "effect_id": "heart_of_nimblade", "description": "When HP drops to 0: revive at 30 HP. 1x per run." }
+    { "id": "heart_of_nimblade", "name": "Heart of Nimblade", "tier": "epic", "subtier": "legendary_save",  "weight": 1, "effect_id": "heart_of_nimblade", "description": "When HP drops to 0: revive at 30 HP. 1x per run." },
+    { "id": "soul_harvest",      "name": "Soul Harvest",      "tier": "epic", "subtier": "scaling",         "weight": 3, "effect_id": "soul_harvest",      "description": "+1 permanent dmg to all attacks per elite/miniboss/boss killed (stacks for the run)." },
+    { "id": "arcane_conduit",    "name": "Arcane Conduit",    "tier": "epic", "subtier": "ability_build",    "weight": 2, "effect_id": "arcane_conduit",    "description": "Weapon Skill & ULT deal +30% dmg, BUT basic RPS-win dmg -15%." },
+    { "id": "glass_cannon",      "name": "Glass Cannon",      "tier": "epic", "subtier": "high_risk",       "weight": 2, "effect_id": "glass_cannon",      "description": "+6 dmg to ALL your attacks, BUT -25 max HP." }
   ],
   "special": [
     { "id": "nimiq_crystal", "name": "Nimiq Crystal", "tier": "special", "subtier": "easter_egg", "weight": 0, "effect_id": "nimiq_crystal", "description": "Convert leftover energy at end of each battle into +1 gold each. CH2 Crystal Shrine node only, 50 gold purchase." }

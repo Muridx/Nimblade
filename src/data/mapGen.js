@@ -1,28 +1,48 @@
 // src/data/mapGen.js
-// 2.7d M1 -- Proc-gen branching map for NIMBLADE CH1.
+// 2.7d M1 -- Proc-gen branching map for NIMBLADE.
+// v3.0 R7 (M2a) -- now CHAPTER-AWARE.
 //
-// Generates a 9-floor StS-style graph each run:
-//   F1 = single START
-//   F2-F7 = 3 nodes each (mixed types)
-//   F8 = 2 campfire nodes (rest before boss)
-//   F9 = single BOSS
+// CH1 (unchanged): hand-tuned 9-floor StS-style graph via pickFloorTypes().
+//   F1 = single START, F2-F7 = 3 nodes each (mixed types),
+//   F8 = 2 campfire nodes, F9 = single BOSS.
 //
-// Node shape: { id, floor, col, type, edges: [destId, ...] }
-// type in: "start" | "normal" | "elite" | "shop" | "campfire" | "treasure" | "boss"
+// CH2 / CH3 (NEW): generated from floorMap.js NODE_LAYOUTS so the encounter
+//   sequence matches Bible Section 5.2 exactly (no economy drift):
+//   - F1 is always a single START node (shadows layout[0]).
+//   - Floors typed "normal" / "elite" are widened to 3 parallel nodes
+//     (branching SHAPE + path choice) -- the player still traverses exactly ONE
+//     per floor, so the encounter economy is identical to the linear layout.
+//   - Curated single-stop floors (shop / campfire / treasure / mystery /
+//     crystal_shrine / blood_altar / miniboss / boss) stay 1 node = everyone
+//     hits the same mandatory stop.
+//   CH2 = 11 floors (F7 crystal_shrine, F10 miniboss, F11 boss).
+//   CH3 = 13 floors (F7 blood_altar, F12 miniboss, F13 boss).
+//
+// Node shape: { id, floor, col, colCount, type, edges: [destId, ...] }
+// type in: "start" | "normal" | "elite" | "shop" | "campfire" | "treasure" |
+//          "mystery" | "crystal_shrine" | "blood_altar" | "miniboss" | "boss"
 //
 // Edge rules:
-//   - Source col X can only connect to target col in [X-1, X, X+1] of next floor.
+//   - Source col X can only connect to a target col within +/-1 of X (scaled by
+//     each floor's node count).
 //   - No edge crossing within the same floor pair (visually clean).
 //   - Every node on F2+ must have >=1 incoming edge.
-//   - F1 start must reach F9 boss via at least 1 path.
+//   - F1 start must reach the final BOSS via at least 1 path.
 //
-// Determinism: takes optional seed for repro/testing. Default = Math.random.
+// Determinism: takes optional seed for repro/testing. Default = rngNext.
+
+import { NODE_LAYOUTS } from "./floorMap.js";
+import { next as rngNext } from "./rng.js";
 
 const FLOOR_COLS = {
   1: 1, 2: 3, 3: 3, 4: 3, 5: 3, 6: 3, 7: 3, 8: 2, 9: 1,
 };
 
-// Pool per floor -- array of 3 type slots (shuffled by gen).
+// CH2/CH3: which node types get widened into a branching (multi-node) floor.
+const BRANCH_TYPES = new Set(["normal", "elite"]);
+const BRANCH_WIDTH = 3;
+
+// Pool per floor -- array of 3 type slots (shuffled by gen). CH1 ONLY.
 // Some slots are RANDOM picks from a sub-pool for run variance.
 function pickFloorTypes(floor, rnd) {
   switch (floor) {
@@ -33,7 +53,7 @@ function pickFloorTypes(floor, rnd) {
       return shuffle(["normal", "normal", wild], rnd);
     }
     case 4: {
-      // M9: mystery placement per design doc §6.3. Floor 4 swaps the
+      // M9: mystery placement per design doc Section 6.3. Floor 4 swaps the
       // campfire slot for a mystery/campfire pick (50/50) so the player gets
       // an extra "gamble" decision early in the run.
       const wild = pick(["mystery", "campfire"], rnd);
@@ -48,7 +68,7 @@ function pickFloorTypes(floor, rnd) {
       return shuffle(["normal", "elite", wild], rnd);
     }
     case 7: {
-      // M9: mystery/elite choice per design §6.3 -- floor 7 gives a 3-way
+      // M9: mystery/elite choice per design Section 6.3 -- floor 7 gives a 3-way
       // wild slot (mystery|treasure|normal) on top of the 2 guaranteed elites.
       const wild = pick(["mystery", "treasure", "normal"], rnd);
       return shuffle(["elite", "elite", wild], rnd);
@@ -57,6 +77,35 @@ function pickFloorTypes(floor, rnd) {
     case 9: return ["boss"];
     default: return [];
   }
+}
+
+// CH2/CH3: derive each floor's node-type slots from NODE_LAYOUTS.
+// Returns an array indexed by (floor-1); each entry is an array of type strings.
+function pickChapterFloorTypes(chapter, ascLevel) {
+  const layout = NODE_LAYOUTS[(chapter || "CH1").toUpperCase()] || NODE_LAYOUTS.CH1;
+  const floors = [];
+  for (let f = 1; f <= layout.length; f++) {
+    if (f === 1) {
+      // F1 is always START (shadows layout[0], same convention as CH1).
+      floors.push(["start"]);
+      continue;
+    }
+    const base = layout[f - 1];
+    const width = BRANCH_TYPES.has(base) ? BRANCH_WIDTH : 1;
+    floors.push(Array.from({ length: width }, () => base));
+  }
+  // Asc 2+: elite spawn rate boost -- convert the middle slot of the LAST
+  // "normal" branching floor into an elite (mirrors CH1 asc>=2 behavior).
+  const asc = Math.max(0, Math.min(5, Number(ascLevel) || 0));
+  if (asc >= 2) {
+    for (let i = floors.length - 1; i >= 1; i--) {
+      if (floors[i].length === BRANCH_WIDTH && floors[i][0] === "normal") {
+        floors[i][Math.floor(BRANCH_WIDTH / 2)] = "elite";
+        break;
+      }
+    }
+  }
+  return floors;
 }
 
 function shuffle(arr, rnd) {
@@ -75,8 +124,6 @@ function pick(arr, rnd) {
 // Generate edges from floor N -> floor N+1.
 // Each source node picks 1-2 valid targets (col diff <= 1, no cross with sibling edges).
 function genEdgesBetween(srcNodes, dstNodes, rnd) {
-  const dstCols = FLOOR_COLS[dstNodes[0].floor];
-  const srcCols = FLOOR_COLS[srcNodes[0].floor];
   const edges = []; // { srcCol, dstCol }
 
   // First pass: each source picks 1 target (mandatory) -- ensures every src has outgoing.
@@ -114,8 +161,8 @@ function genEdgesBetween(srcNodes, dstNodes, rnd) {
 
 function pickTarget(src, dstNodes, existingEdges, rnd, excludeIds = []) {
   // Map src col to dst col-space (since floors can have different col counts).
-  const srcMaxCol = FLOOR_COLS[src.floor] - 1;
-  const dstMaxCol = FLOOR_COLS[dstNodes[0].floor] - 1;
+  const srcMaxCol = (src.colCount || 1) - 1;
+  const dstMaxCol = (dstNodes[0].colCount || 1) - 1;
   const srcColScaled = srcMaxCol === 0 ? dstMaxCol / 2 : (src.col / srcMaxCol) * dstMaxCol;
 
   const candidates = dstNodes.filter((dst) => {
@@ -140,8 +187,8 @@ function wouldCross(srcCol, dstCol, existingEdges) {
 }
 
 function nearestSrcForDst(dst, srcNodes, existingEdges) {
-  const srcMaxCol = FLOOR_COLS[srcNodes[0].floor] - 1;
-  const dstMaxCol = FLOOR_COLS[dst.floor] - 1;
+  const srcMaxCol = (srcNodes[0].colCount || 1) - 1;
+  const dstMaxCol = (dst.colCount || 1) - 1;
   const sorted = srcNodes.slice().sort((a, b) => {
     const aCol = srcMaxCol === 0 ? dstMaxCol / 2 : (a.col / srcMaxCol) * dstMaxCol;
     const bCol = srcMaxCol === 0 ? dstMaxCol / 2 : (b.col / srcMaxCol) * dstMaxCol;
@@ -171,28 +218,19 @@ function reachableToBoss(nodes) {
   return false;
 }
 
-function buildOneMap(rnd, ascLevel) {
+// Shared: turn a per-floor array of type-slots into a connected node graph.
+function buildFromFloorTypes(floorTypeRows, rnd) {
   const nodes = [];
   const nodesByFloor = {};
-  const asc = Math.max(0, Math.min(5, Number(ascLevel) || 0));
+  const floorCount = floorTypeRows.length;
 
-  for (let floor = 1; floor <= 9; floor++) {
-    let types = pickFloorTypes(floor, rnd);
-    // M6 (Asc 2+): elite spawn rate +50%. We inject ONE extra guaranteed elite
-    // by swapping a "normal" slot for an "elite" slot on floor 4 (which
-    // normally has zero elites). Net effect: ~+1 elite per run on top of the
-    // baseline ~2-3, ≈ +50% over the long run.
-    if (asc >= 2 && floor === 4) {
-      const idx = types.indexOf("normal");
-      if (idx !== -1) {
-        types = types.slice();
-        types[idx] = "elite";
-      }
-    }
+  for (let floor = 1; floor <= floorCount; floor++) {
+    const types = floorTypeRows[floor - 1] || [];
     const floorNodes = types.map((type, col) => ({
       id: `f${floor}_c${col}`,
       floor,
       col,
+      colCount: types.length,
       type,
       edges: [],
     }));
@@ -200,22 +238,55 @@ function buildOneMap(rnd, ascLevel) {
     nodesByFloor[floor] = floorNodes;
   }
 
-  for (let floor = 1; floor <= 8; floor++) {
+  for (let floor = 1; floor < floorCount; floor++) {
     genEdgesBetween(nodesByFloor[floor], nodesByFloor[floor + 1], rnd);
   }
 
   return nodes;
 }
 
+// CH1 builder -- hand-tuned 9-floor layout (unchanged behavior).
+function buildOneMap(rnd, ascLevel) {
+  const asc = Math.max(0, Math.min(5, Number(ascLevel) || 0));
+  const floorTypeRows = [];
+  for (let floor = 1; floor <= 9; floor++) {
+    let types = pickFloorTypes(floor, rnd);
+    // M6 (Asc 2+): elite spawn rate +50%. Inject ONE extra guaranteed elite by
+    // swapping a "normal" slot for "elite" on floor 4 (normally zero elites).
+    if (asc >= 2 && floor === 4) {
+      const idx = types.indexOf("normal");
+      if (idx !== -1) {
+        types = types.slice();
+        types[idx] = "elite";
+      }
+    }
+    floorTypeRows.push(types);
+  }
+  return buildFromFloorTypes(floorTypeRows, rnd);
+}
+
+// CH2/CH3 builder -- NODE_LAYOUTS-driven, branching normal/elite floors.
+function buildChapterMap(chapter, rnd, ascLevel) {
+  const floorTypeRows = pickChapterFloorTypes(chapter, ascLevel);
+  return buildFromFloorTypes(floorTypeRows, rnd);
+}
+
 /**
  * generateMap -- main entry.
- * Returns { nodes, startId, bossId } or throws if no valid map after 20 retries.
+ * @param {number} [seed]      optional seed for deterministic gen.
+ * @param {number} [ascLevel]  ascension level (0-5).
+ * @param {string} [chapter]   "CH1" (default) | "CH2" | "CH3".
+ * Returns { nodes, startId, bossId, chapter } or a failsafe map after 20 retries.
  */
-export function generateMap(seed, ascLevel) {
-  const rnd = seed != null ? mulberry32(seed) : Math.random;
+export function generateMap(seed, ascLevel, chapter) {
+  const rnd = seed != null ? mulberry32(seed) : rngNext;
+  const ch = (chapter || "CH1").toUpperCase();
+  const build = ch === "CH1"
+    ? () => buildOneMap(rnd, ascLevel)
+    : () => buildChapterMap(ch, rnd, ascLevel);
 
   for (let attempt = 0; attempt < 20; attempt++) {
-    const nodes = buildOneMap(rnd, ascLevel);
+    const nodes = build();
     if (reachableToBoss(nodes)) {
       const start = nodes.find((n) => n.type === "start");
       const boss = nodes.find((n) => n.type === "boss");
@@ -223,16 +294,18 @@ export function generateMap(seed, ascLevel) {
         nodes,
         startId: start.id,
         bossId: boss.id,
+        chapter: ch,
       };
     }
   }
   // Failsafe: should never hit with our gen rules, but log if so.
-  console.warn("[mapGen] failed to generate reachable map after 20 attempts");
-  const nodes = buildOneMap(rnd, ascLevel);
+  console.warn(`[mapGen] failed to generate reachable ${ch} map after 20 attempts`);
+  const nodes = build();
   return {
     nodes,
     startId: nodes.find((n) => n.type === "start").id,
     bossId: nodes.find((n) => n.type === "boss").id,
+    chapter: ch,
   };
 }
 
@@ -256,15 +329,15 @@ export function printMapAscii(map) {
   }
   const TYPE_GLYPH = {
     start: "[S]", normal: "[N]", elite: "[E]", shop: "[$]",
-    campfire: "[F]", treasure: "[?]", boss: "[B]",
+    campfire: "[F]", treasure: "[T]", mystery: "[?]",
+    crystal_shrine: "[C]", blood_altar: "[A]", miniboss: "[M]", boss: "[B]",
   };
-  console.log("[map] CH1 graph (F9 top -> F1 bottom):");
-  for (let f = 9; f >= 1; f--) {
-    const row = map.nodes.filter((n) => n.floor === f);
-    const maxCols = 3;
-    const pad = "  ".repeat(maxCols - row.length); // visual centering
+  const maxFloor = map.nodes.reduce((m, n) => Math.max(m, n.floor), 0);
+  console.log(`[map] ${map.chapter || "CH1"} graph (F${maxFloor} top -> F1 bottom):`);
+  for (let f = maxFloor; f >= 1; f--) {
+    const row = map.nodes.filter((n) => n.floor === f).sort((a, b) => a.col - b.col);
     const line = row.map((n) => TYPE_GLYPH[n.type] || "[?]").join(" ");
-    console.log(`F${f}: ${pad}${line}`);
+    console.log(`F${f}: ${line}`);
   }
   console.log("\n[map] Edges:");
   for (const n of map.nodes) {

@@ -1,38 +1,38 @@
 /**
- * NIMBLADE -- FORGE EFFECTS ENGINE (M5)
+ * NIMBLADE — FORGE EFFECTS ENGINE (Bible v3.0 Appendix C)
  *
  * Central API that reads `meta.forge[node_key]` and converts each owned node
  * into a concrete in-run modifier. Everything that touches gameplay funnels
  * through here so the upgrade tree (lobby.js) and the simulation (battle.js,
- * shop.js, treasure.js, campfire.js) stay decoupled.
+ * shop.js, etc.) stay decoupled.
  *
- * 12 nodes from Design Doc v1.1 \u00a77.2:
+ * 12 nodes — 4 branches × 3 tiers. Cost: T1=40, T2=120, T3=250 shards.
  *
  *   SURVIVAL
- *     survival_t1  -- +5 max HP                         [RUN INIT]   (M5a \u2713)
- *     survival_t2  -- Campfire REST 60% (was 40%)       [CAMPFIRE]   (M5b)
- *     survival_t3  -- Free starter relic                [RUN INIT]   (M5a \u2713)
+ *     survival_t1  — +5 max HP                        [RUN INIT]
+ *     survival_t2  — +10 max HP                       [RUN INIT]
+ *     survival_t3  — Free starter common relic         [RUN INIT]
  *
  *   ECONOMY
- *     economy_t1   -- +10g start                        [RUN INIT]   (M5a \u2713)
- *     economy_t2   -- Shop -10%                         [SHOP]       (M5b)
- *     economy_t3   -- Treasure x2                       [TREASURE]   (M5b)
+ *     economy_t1   — +10g start                       [RUN INIT]
+ *     economy_t2   — +5g per battle win                [BATTLE]
+ *     economy_t3   — Shop prices −20%                  [SHOP]
  *
  *   COMBAT
- *     combat_t1    -- SLASH +1 dmg                      [BATTLE]     (M5b)
- *     combat_t2    -- Combo @ 2 wins (was 3)            [BATTLE]     (M5b)
- *     combat_t3    -- Counter loss -2 (take +1, not +3) [BATTLE]     (M5b)
+ *     combat_t1    — +2 base dmg (all attacks)         [BATTLE]
+ *     combat_t2    — +5 energy regen per round         [BATTLE]
+ *     combat_t3    — Start each battle with 30 energy  [BATTLE]
  *
- *   ABILITIES
- *     abilities_t1 -- Wild Strike costs 30e (was 40)    [BATTLE]     (M5b)
- *     abilities_t2 -- Start +20 energy                  [RUN INIT]   (M5a \u2713)
- *     abilities_t3 -- All Ultimates -10 energy          [BATTLE]     (M5b)
- *
- * M5a wires the RUN-INIT layer (4 nodes).
- * M5b adds the in-scene helpers (battle/shop/treasure/campfire = 8 nodes).
+ *   LUCK (replaces old Abilities branch)
+ *     luck_t1      — +10% rare relic chance            [SHOP/DROPS]
+ *     luck_t2      — +1 option at elite relic picks    [ELITE REWARD]
+ *     luck_t3      — Start run with 1 random rare      [RUN INIT]
  */
 
 import relicsData from "./relics.json" assert { type: "json" };
+import { next as rngNext } from "./rng.js";
+
+// ── Core ─────────────────────────────────────────────────────────────────────
 
 /** Read forge ownership safely from a meta object. */
 export function ownsForge(meta, key) {
@@ -40,136 +40,159 @@ export function ownsForge(meta, key) {
   return !!meta.forge[key];
 }
 
-/* ---------- RUN-INIT EFFECTS (M5a) ---------- */
+// ── RUN-INIT EFFECTS (applied once when a new run starts) ────────────────────
 
 /**
- * +5 max HP if survival_t1 is forged. Returns the bonus HP to add to BOTH
- * playerHp and playerMaxHp in freshRun.
+ * SURVIVAL T1 + T2 — total max HP bonus to add to playerHp & playerMaxHp.
+ * T1 = +5, T2 = +10 (stacks additively: up to +15).
  */
 export function forgeMaxHpBonus(meta) {
-  return ownsForge(meta, "survival_t1") ? 5 : 0;
+  let bonus = 0;
+  if (ownsForge(meta, "survival_t1")) bonus += 5;
+  if (ownsForge(meta, "survival_t2")) bonus += 10;
+  return bonus;
 }
 
 /**
- * +10 starting gold if economy_t1 is forged.
- * Returns the bonus to add to BOTH `gold` and `totalGoldEarned`
- * (totalGoldEarned counts every positive gold gain for shard payout, so
- * starter gold counts too -- it was earned via meta progression).
+ * ECONOMY T1 — +10 starting gold.
+ * Added to both `gold` and `totalGoldEarned` at run init.
  */
 export function forgeStartGoldBonus(meta) {
   return ownsForge(meta, "economy_t1") ? 10 : 0;
 }
 
 /**
- * +20 starting energy if abilities_t2 is forged. Set on run.energy at
- * freshRun -- carries over into the first battle's player.energy via the
- * existing carry-over plumbing in battle.js setUpPlayer().
- */
-export function forgeStartEnergyBonus(meta) {
-  return ownsForge(meta, "abilities_t2") ? 20 : 0;
-}
-
-/**
- * Pick a random common relic ID for the survival_t3 starter-relic bonus.
- * Uses weighted random over the commons pool (same weights as treasure).
+ * SURVIVAL T3 — pick a random common relic ID for the free starter relic.
+ * Uses weighted random over the commons pool.
  * Returns relic id string, or null if survival_t3 isn't owned.
  *
- * Note: this is a PURE picker -- caller is responsible for pushing the id
- * into run.relics via acquireRelic() so any on-acquire effect (e.g. dusty
- * tome's +3 max HP) is applied through the standard relic engine.
+ * Caller must push the id into run.relics via acquireRelic() so on-acquire
+ * effects are applied through the standard relic engine.
  */
 export function forgeStarterRelicId(meta) {
   if (!ownsForge(meta, "survival_t3")) return null;
   const pool = (relicsData && relicsData.commons) || [];
   if (pool.length === 0) return null;
   const total = pool.reduce((s, r) => s + (r.weight || 1), 0);
-  let roll = Math.random() * total;
+  let roll = rngNext() * total;
   for (const r of pool) {
-    roll -= (r.weight || 1);
+    roll -= r.weight || 1;
     if (roll <= 0) return r.id;
   }
   return pool[pool.length - 1].id;
 }
 
 /**
- * Convenience snapshot of all run-init effects -- callable by lobby.js
- * freshRun to log what was applied (useful for debug + a future toast).
+ * LUCK T3 — pick a random rare relic ID for the starting rare bonus.
+ * Returns relic id string, or null if luck_t3 isn't owned.
+ * Same weighted-random logic as starterRelicId but over the rares pool.
+ */
+export function forgeLuckStarterRareId(meta) {
+  if (!ownsForge(meta, "luck_t3")) return null;
+  const pool = (relicsData && relicsData.rares) || [];
+  if (pool.length === 0) return null;
+  const total = pool.reduce((s, r) => s + (r.weight || 1), 0);
+  let roll = rngNext() * total;
+  for (const r of pool) {
+    roll -= r.weight || 1;
+    if (roll <= 0) return r.id;
+  }
+  return pool[pool.length - 1].id;
+}
+
+/**
+ * Convenience snapshot of all run-init effects — useful for lobby.js
+ * freshRun logging and future toast notifications.
  */
 export function describeRunInitEffects(meta) {
   const out = [];
-  if (forgeMaxHpBonus(meta))      out.push("+5 max HP (Survival T1)");
-  if (forgeStartGoldBonus(meta))  out.push("+10 gold (Economy T1)");
-  if (forgeStartEnergyBonus(meta)) out.push("+20 starting energy (Abilities T2)");
-  if (ownsForge(meta, "survival_t3")) out.push("Free starter relic (Survival T3)");
+  const hpBonus = forgeMaxHpBonus(meta);
+  if (hpBonus > 0) out.push(`+${hpBonus} max HP (Survival)`);
+  if (forgeStartGoldBonus(meta))          out.push("+10 gold (Economy T1)");
+  if (ownsForge(meta, "survival_t3"))     out.push("Free starter relic (Survival T3)");
+  if (ownsForge(meta, "luck_t3"))         out.push("Random rare relic (Luck T3)");
   return out;
 }
 
-/* ---------- IN-SCENE EFFECTS (M5b) ---------- */
+// ── IN-BATTLE EFFECTS ────────────────────────────────────────────────────────
 
 /**
- * COMBAT T1 -- bonus damage added to every SLASH WIN. Stacks ADDITIVELY with
- * existing relic SLASH bonuses (broken_dagger, whetstone, etc).
+ * COMBAT T1 — +2 base damage added to ALL attacks (SLASH, COUNTER, WS, ULT).
+ * Stacks additively with relic bonuses.
  */
-export function forgeSlashBonus(meta) {
-  return ownsForge(meta, "combat_t1") ? 1 : 0;
+export function forgeDmgBonus(meta) {
+  return ownsForge(meta, "combat_t1") ? 2 : 0;
 }
 
 /**
- * COMBAT T2 -- combo bonus trigger threshold. Default 3, drops to 2 when
- * forged so the +10% combo bonus kicks in one win earlier.
+ * COMBAT T2 — +5 energy regen per round.
+ * Added to the per-turn energy regen value in battle loop.
  */
-export function forgeComboThreshold(meta) {
-  return ownsForge(meta, "combat_t2") ? 2 : 3;
+export function forgeEnergyRegenBonus(meta) {
+  return ownsForge(meta, "combat_t2") ? 5 : 0;
 }
 
 /**
- * COMBAT T3 -- on RPS loss while COUNTER-ing, you currently take base + 3
- * extra. This returns the REDUCTION amount (2 if forged, 0 otherwise) so
- * caller does `Math.max(0, S.counter_loss_dmg_taken - reduction)`.
+ * COMBAT T3 — +30 starting energy per battle.
+ * Applied at the start of each battle (setUpPlayer).
  */
-export function forgeCounterLossReduction(meta) {
-  return ownsForge(meta, "combat_t3") ? 2 : 0;
+export function forgeBattleStartEnergy(meta) {
+  return ownsForge(meta, "combat_t3") ? 30 : 0;
 }
 
 /**
- * ECONOMY T2 -- discount fraction. 0.10 = 10% off. Caller does
- * `Math.ceil(basePrice * (1 - discount))`. Ceil to avoid 0g exploits on
- * 1g items.
+ * ECONOMY T2 — +5 gold per battle win.
+ * Added to gold reward after each battle victory.
+ */
+export function forgeBattleGoldBonus(meta) {
+  return ownsForge(meta, "economy_t2") ? 5 : 0;
+}
+
+// ── SHOP EFFECTS ─────────────────────────────────────────────────────────────
+
+/**
+ * ECONOMY T3 — shop discount fraction. 0.20 = 20% off.
+ * Caller does `Math.ceil(basePrice * (1 - discount))`.
  */
 export function forgeShopDiscount(meta) {
-  return ownsForge(meta, "economy_t2") ? 0.10 : 0;
+  return ownsForge(meta, "economy_t3") ? 0.20 : 0;
+}
+
+// ── LUCK EFFECTS ─────────────────────────────────────────────────────────────
+
+/**
+ * LUCK T1 — +10% rare relic chance at shops and drops.
+ * Returns the bonus percentage (0.10) or 0.
+ * Caller adds this to base rare-tier probability when rolling relic drops.
+ */
+export function forgeLuckRareBonus(meta) {
+  return ownsForge(meta, "luck_t1") ? 0.10 : 0;
 }
 
 /**
- * ECONOMY T3 -- number of relic picks granted by a treasure node. Default
- * 1, becomes 2 when forged. Treasure scene still rolls 3 cards but lets the
- * player claim up to N of them.
+ * LUCK T2 — +1 option at elite relic picks.
+ * Returns the extra choice count (0 or 1).
  */
-export function forgeTreasurePicks(meta) {
-  return ownsForge(meta, "economy_t3") ? 2 : 1;
+export function forgeLuckExtraChoice(meta) {
+  return ownsForge(meta, "luck_t2") ? 1 : 0;
 }
 
-/**
- * SURVIVAL T2 -- Campfire REST bonus HP on top of the existing +35 base.
- * +25 bonus means an upgraded REST on a 100-HP run heals 60 HP total
- * (mirrors the design doc "REST 60%" language).
- */
+// ---------------------------------------------------------------------------
+// LEGACY SHIMS (old "Abilities" forge branch, replaced by Luck branch in store.js).
+// These node types no longer exist in FORGE_NODES, so the bonuses are inert.
+// Kept as exports so lobby.js / campfire.js / treasure.js keep importing cleanly.
+// ---------------------------------------------------------------------------
+export function forgeStartEnergyBonus(meta) {
+  // No run-start energy node in the current design (combat_t3 covers battle-start).
+  return 0;
+}
+
 export function forgeRestHealBonus(meta) {
-  return ownsForge(meta, "survival_t2") ? 25 : 0;
+  // No campfire heal-bonus node in the current design.
+  return 0;
 }
 
-/**
- * ABILITIES T1 -- Wild Strike energy cost reduction. -10 when forged.
- * Returns the REDUCTION; caller does `Math.max(0, S.ws_cost - reduction)`.
- */
-export function forgeWildStrikeCostReduction(meta) {
-  return ownsForge(meta, "abilities_t1") ? 10 : 0;
-}
-
-/**
- * ABILITIES T3 -- Ultimate energy cost reduction. -10 when forged.
- * Returns the REDUCTION; caller does `Math.max(0, S.ult_cost - reduction)`.
- */
-export function forgeUltCostReduction(meta) {
-  return ownsForge(meta, "abilities_t3") ? 10 : 0;
+export function forgeTreasurePicks(meta) {
+  // No treasure extra-pick node in the current design -> default to 1 pick.
+  return 1;
 }

@@ -1,4 +1,5 @@
 import { mountScene } from "./sceneManager.js";
+import { seed as rngSeed, getSeed as rngGetSeed } from "../data/rng.js";
 import { getState, setState } from "../state/store.js";
 import { generateMap } from "../data/mapGen.js";
 import { connectWallet } from "../data/wallet.js";
@@ -150,6 +151,11 @@ export function lobbyScene(root) {
     if (action === "try-demo") {
       setState({ run: freshRun("demo") });
       mountScene("weaponSelect", root);
+      return;
+    }
+    // Weekly Gauntlet: dedicated scene (NIM->gem exchange + tournament).
+    if (action === "open-gauntlet") {
+      mountScene("gauntlet", root);
       return;
     }
     // M4: open forge modal (real upgrade tree, no more stub).
@@ -486,9 +492,18 @@ function render(root) {
       </div>
 
       <div class="lobby__cta">
-        <button class="btn btn--primary lobby__btn-start" data-action="start-run">START RUN</button>
-        <button class="btn btn--secondary lobby__btn-demo" data-action="try-demo">TRY DEMO</button>
-        <p class="lobby__hint">Demo runs Chapter 1 only, no wallet needed</p>
+        <button class="btn btn--primary lobby__btn-start" data-action="start-run">
+          <span class="cta__label">START RUN</span>
+          <span class="cta__sub">Full run \u00b7 all chapters</span>
+        </button>
+        <button class="btn btn--secondary lobby__btn-demo" data-action="try-demo">
+          <span class="cta__label">TRY DEMO</span>
+          <span class="cta__sub">Chapter 1 only \u00b7 no wallet</span>
+        </button>
+        <button class="btn lobby__btn-gauntlet" data-action="open-gauntlet">
+          <span class="cta__label">\u2694\ufe0f WEEKLY GAUNTLET</span>
+          <span class="cta__sub">Skill tournament \u00b7 NIM entry</span>
+        </button>
       </div>
 
       ${forgeModalHTML}
@@ -946,8 +961,13 @@ function freshRun(mode) {
   const ascHpPenalty = ascensionMaxHpPenalty(ascLevel);
   const startMaxHp = Math.max(10, 100 + hpBonus - ascHpPenalty);
 
+  // SEED migration: seed the per-run PRNG ONCE here, store run.seed for the
+  // leaderboard record + Phase C server replay. All gameplay randomness
+  // (map, combat, rewards, events) now draws from this single seeded stream.
+  rngSeed();
   let run = {
     mode,
+    seed: rngGetSeed(),
     weapon: null,
     chapter: "CH1",
     floor: 1,

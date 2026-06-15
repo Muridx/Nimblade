@@ -2,6 +2,7 @@
 // All effects read from `run.relics` (array of relic id strings).
 // Pure functions: take run/state, return numeric/boolean bonuses.
 
+import { next as rngNext } from "./rng.js";
 export function hasRelic(run, id) {
   if (!run || !Array.isArray(run.relics)) return false;
   return run.relics.includes(id);
@@ -12,12 +13,9 @@ export function slashDmgBonus(run) {
   let b = 0;
   if (hasRelic(run, "broken_dagger")) b += 1;
   if (hasRelic(run, "whetstone")) b += 2;
-  // 2.7c-2 rare: Berserker Stone -- under 30% HP, SLASH dmg +3
-  if (hasRelic(run, "berserker_stone")) {
-    const maxHp = run?.playerMaxHp || 100;
-    const hp = run?.playerHp ?? maxHp;
-    if (maxHp > 0 && hp / maxHp < 0.30) b += 3;
-  }
+  // Berserker Stone (tooltip): SLASH dmg +5 unconditional. Self-dmg downside
+  // (+2/round first 5 rounds) handled via berserkerStoneSelfDmg() at turn start.
+  if (hasRelic(run, "berserker_stone")) b += 5;
   return b;
 }
 
@@ -91,21 +89,22 @@ export function hasTorch(run) {
 
 // ---- 2.7c-2 RARES ----------------------------------------------------------
 
-// Cleansing Bell: +20 energy at battle start.
-export function bonusEnergyOnBattleStart(run) {
-  return hasRelic(run, "cleansing_bell") ? 20 : 0;
+// Cleansing Bell (tooltip): 1x/battle clear all curse/DoT. Owned-check only;
+// battle.js calls clearPlayerDebuffs() once when a debuff is present.
+export function hasCleansingBell(run) {
+  return hasRelic(run, "cleansing_bell");
 }
 
-// Gambler's Dice: roll once at battle start. Returns { gold:+15 } or { hp:-10 } or null.
-export function rollGamblersDice(run) {
-  if (!hasRelic(run, "gamblers_dice")) return null;
-  return Math.random() < 0.5 ? { gold: 15 } : { hp: -10 };
+// Gambler's Dice (tooltip): +30 energy at every battle start (-10 maxHp for the
+// run applied once at acquire in acquireRelic).
+export function gamblersDiceEnergyOnStart(run) {
+  return hasRelic(run, "gamblers_dice") ? 30 : 0;
 }
 
-// Frostbite Shard: 15% chance on SLASH win to freeze enemy (skip next turn).
+// Frostbite Shard (tooltip): 10% chance on SLASH win to freeze enemy next turn.
 export function rollFrostbiteFreeze(run) {
   if (!hasRelic(run, "frostbite_shard")) return false;
-  return Math.random() < 0.15;
+  return rngNext() < 0.10;
 }
 
 // Mirror Shield: % of blocked dmg reflected back on GUARD win (0..1).
@@ -113,31 +112,39 @@ export function mirrorReflectFrac(run) {
   return hasRelic(run, "mirror_shield") ? 0.5 : 0;
 }
 
-// Holy Water: flat enemy dmg reduction at elite/boss only (anti-elite tax).
-export function holyWaterReduction(run, isEliteOrBoss) {
-  if (!isEliteOrBoss) return 0;
-  return hasRelic(run, "holy_water") ? 2 : 0;
+// Holy Water (tooltip): 1x/battle disable monster healing for 3 turns. Owned-check
+// only; battle.js arms the charge and gates healEnemy() for a 3-turn window.
+export function hasHolyWater(run) {
+  return hasRelic(run, "holy_water");
 }
 
-// Iron Will: when player takes a "big hit" (>=25% maxHp in one strike),
-// permanently +10 maxHp for the run. Returns true if it triggered (caller mutates).
-export function ironWillTriggers(run, dmgTaken) {
-  if (!hasRelic(run, "iron_will")) return false;
-  const maxHp = run?.playerMaxHp || 100;
-  return dmgTaken >= Math.ceil(maxHp * 0.25);
+// Iron Will (tooltip): 1x/battle ignore one boss SCHEME (treat as honest).
+// Owned-check only; battle.js consumes a per-battle charge to cancel the first
+// scheme / enraged feint and force the displayed intent honest that turn.
+export function hasIronWill(run) {
+  return hasRelic(run, "iron_will");
 }
 
-// Chained Grimoire: on COUNTER win, +1 SLASH dmg (permanent for run), cap 3 stacks.
-// Returns the stack count to add (0 or 1) given current stored stacks.
-export function grimoireGainOnCounterWin(run) {
-  if (!hasRelic(run, "chained_grimoire")) return 0;
-  const cur = run?.grimoireStacks || 0;
-  return cur < 3 ? 1 : 0;
+// Chained Grimoire (tooltip): COUNTER win dmg +6, BUT lose 5 energy per turn.
+export function grimoireCounterBonus(run) {
+  return hasRelic(run, "chained_grimoire") ? 6 : 0;
+}
+export function grimoireEnergyDrain(run) {
+  return hasRelic(run, "chained_grimoire") ? 5 : 0;
 }
 
-// Phoenix Ember: one-shot revive at 30 HP. Caller checks run.phoenixUsed.
-export function canPhoenixRevive(run) {
-  return hasRelic(run, "phoenix_ember") && !run?.phoenixUsed;
+// Phoenix Ember (tooltip): 1x/battle, when HP drops below 20% maxHp, heal 15 HP.
+// Owned-check + threshold; battle.js tracks a per-battle charge (state).
+export function hasPhoenixEmber(run) {
+  return hasRelic(run, "phoenix_ember");
+}
+export function phoenixHealAmount() { return 15; }
+export function phoenixThresholdFrac() { return 0.20; }
+
+// Berserker Stone (tooltip downside): +2 self-dmg per round for the first 5 rounds.
+export function berserkerStoneSelfDmg(run, turn) {
+  if (!hasRelic(run, "berserker_stone")) return 0;
+  return (turn >= 1 && turn <= 5) ? 2 : 0;
 }
 
 // Runic Compass: passive flag for upcoming map UI (no gameplay effect yet).
@@ -202,6 +209,70 @@ export function canHeartRevive(run) {
   return hasRelic(run, "heart_of_nimblade") && !run?.heartUsed;
 }
 
+// ---- R9 RELICS (commons + rares + epics, set expansion 32->42) -------------
+
+// Counterweight (common): COUNTER win dmg +2.
+export function counterDmgBonus(run) {
+  return hasRelic(run, "counterweight") ? 2 : 0;
+}
+
+// Parry Stud (common): GUARD win dmg +2 (bash back on a successful guard).
+export function guardWinDmgBonus(run) {
+  return hasRelic(run, "parry_stud") ? 2 : 0;
+}
+
+// Coin Pouch (common): +3 gold per battle won (folded into bonusGoldOnBattleWin caller).
+export function coinPouchGold(run) {
+  return hasRelic(run, "coin_pouch") ? 3 : 0;
+}
+
+// Trail Rations (common): heal this many HP each time the player enters a new floor.
+export function trailRationsHeal(run) {
+  return hasRelic(run, "trail_rations") ? 4 : 0;
+}
+
+// Momentum Coil (rare): +1 dmg per consecutive RPS win this battle, cap +5.
+// `comboCount` is the live battle streak (resets on draw/loss already).
+export function momentumCoilBonus(run, comboCount) {
+  if (!hasRelic(run, "momentum_coil")) return 0;
+  return Math.min(Math.max(0, comboCount || 0), 5);
+}
+
+// Frost Lattice (rare): 20% chance on GUARD win to freeze enemy next turn.
+export function rollFrostLatticeFreeze(run) {
+  if (!hasRelic(run, "frost_lattice")) return false;
+  return rngNext() < 0.20;
+}
+
+// Ethereal Edge (rare): fraction of enemy armor ignored by player attacks (0..1).
+export function etherealArmorPenFrac(run) {
+  return hasRelic(run, "ethereal_edge") ? 0.5 : 0;
+}
+
+// Soul Harvest (epic): +1 permanent dmg to ALL attacks per elite/miniboss/boss kill.
+// Stacks stored on run.soulHarvestStacks; incremented by reward handler.
+export function soulHarvestDmgBonus(run) {
+  if (!hasRelic(run, "soul_harvest")) return 0;
+  return run?.soulHarvestStacks || 0;
+}
+// Tiers that count as a "kill" for Soul Harvest.
+export function soulHarvestKillTier(tier) {
+  return tier === "elite" || tier === "miniboss" || tier === "boss";
+}
+
+// Glass Cannon (epic): +6 flat dmg to ALL attacks (maxHp -25 handled at acquire).
+export function glassCannonDmgBonus(run) {
+  return hasRelic(run, "glass_cannon") ? 6 : 0;
+}
+
+// Arcane Conduit (epic): Weapon Skill & ULT +30%, basic RPS-win dmg -15%.
+export function arcaneConduitAbilityMult(run) {
+  return hasRelic(run, "arcane_conduit") ? 1.30 : 1.0;
+}
+export function arcaneConduitBasicMult(run) {
+  return hasRelic(run, "arcane_conduit") ? 0.85 : 1.0;
+}
+
 // ---- Acquire helper ----
 // Centralized "give relic to player" mutation. Adds id to relics[] and
 // applies one-time stat bumps. Returns a NEW run object.
@@ -217,9 +288,10 @@ export function acquireRelic(run, relicId) {
   if (relicId === "phoenix_ember" && typeof newRun.phoenixUsed === "undefined") {
     newRun.phoenixUsed = false;
   }
-  // Chained Grimoire stack counter initialised.
-  if (relicId === "chained_grimoire" && typeof newRun.grimoireStacks === "undefined") {
-    newRun.grimoireStacks = 0;
+  // Gambler's Dice (tooltip): -10 max HP for the run, applied once at acquire.
+  if (relicId === "gamblers_dice") {
+    newRun.playerMaxHp = Math.max(1, (newRun.playerMaxHp || 100) - 10);
+    newRun.playerHp = Math.min(newRun.playerHp ?? newRun.playerMaxHp, newRun.playerMaxHp);
   }
   // 2.7c-3 EPIC: Devil's Bargain -- +30 maxHp on acquire (one-time).
   if (relicId === "devils_bargain") {
@@ -229,6 +301,15 @@ export function acquireRelic(run, relicId) {
   // 2.7c-3 EPIC: Heart of Nimblade -- one-shot revive (parallel to phoenix).
   if (relicId === "heart_of_nimblade" && typeof newRun.heartUsed === "undefined") {
     newRun.heartUsed = false;
+  }
+  // R9 EPIC: Glass Cannon -- -25 max HP on acquire (one-time, floor at 1 HP).
+  if (relicId === "glass_cannon") {
+    newRun.playerMaxHp = Math.max(1, (newRun.playerMaxHp || 100) - 25);
+    newRun.playerHp = Math.min(newRun.playerHp ?? newRun.playerMaxHp, newRun.playerMaxHp);
+  }
+  // R9 EPIC: Soul Harvest -- kill-counter for permanent dmg scaling.
+  if (relicId === "soul_harvest" && typeof newRun.soulHarvestStacks === "undefined") {
+    newRun.soulHarvestStacks = 0;
   }
   return newRun;
 }

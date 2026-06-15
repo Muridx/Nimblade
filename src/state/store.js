@@ -39,31 +39,30 @@
 const META_STORAGE_KEY = "nimblade.meta.v1";
 
 /**
- * Forge tree node keys per Design Doc v1.1 §7.2.
- * 4 branches x 3 tiers = 12 nodes. Each branch has prereq chain T1 -> T2 -> T3.
- * Cost: T1 = 40 shards, T2 = 100 shards, T3 = 250 shards.
+ * Forge tree node keys per Bible v3.0 Appendix C.
+ * 4 branches × 3 tiers = 12 nodes. Each branch has prereq chain T1 → T2 → T3.
+ * Cost: T1 = 40, T2 = 120, T3 = 250 shards. Total = (40+120+250)×4 = 1,640.
  *
- * Keep this list authoritative -- forge UI + run-init effect application both
- * read from here. If you add a node, also wire its effect in src/data/forgeEffects.js
- * (will be created in M5).
+ * Keep this list authoritative — forge UI + run-init effect application both
+ * read from here. Effects wired in src/data/forgeEffects.js.
  */
 export const FORGE_NODES = [
-  // Survival branch -- HP & healing
-  { key: "survival_t1",   branch: "survival",  tier: 1, cost: 40,  name: "+5 max HP",                desc: "Start every run with 5 extra max HP." },
-  { key: "survival_t2",   branch: "survival",  tier: 2, cost: 100, name: "Campfire REST 60%",         desc: "REST campfire heals 60% max HP (was 40%)." },
-  { key: "survival_t3",   branch: "survival",  tier: 3, cost: 250, name: "Free starter relic",        desc: "Start every run with 1 free common relic." },
-  // Economy branch -- gold & shop
-  { key: "economy_t1",    branch: "economy",   tier: 1, cost: 40,  name: "+10g start",                desc: "Start every run with 10 extra gold." },
-  { key: "economy_t2",    branch: "economy",   tier: 2, cost: 100, name: "Shop -10%",                  desc: "Shop prices reduced by 10%." },
-  { key: "economy_t3",    branch: "economy",   tier: 3, cost: 250, name: "Treasure x2",                desc: "Treasure nodes grant 2 relics instead of 1." },
-  // Combat branch -- damage & RPS
-  { key: "combat_t1",     branch: "combat",    tier: 1, cost: 40,  name: "SLASH +1 dmg",               desc: "SLASH win deals +1 damage permanently." },
-  { key: "combat_t2",     branch: "combat",    tier: 2, cost: 100, name: "Combo @ 2",                  desc: "Combo bonus triggers at 2 wins (was 3)." },
-  { key: "combat_t3",     branch: "combat",    tier: 3, cost: 250, name: "Counter loss -2",            desc: "COUNTER loss penalty -2 (player takes +1 instead of +3)." },
-  // Abilities branch -- energy & ult
-  { key: "abilities_t1",  branch: "abilities", tier: 1, cost: 40,  name: "Wild Strike 30e",            desc: "Wild Strike costs 30 energy (was 40)." },
-  { key: "abilities_t2",  branch: "abilities", tier: 2, cost: 100, name: "Start +20 energy",           desc: "Start every battle with 20 energy." },
-  { key: "abilities_t3",  branch: "abilities", tier: 3, cost: 250, name: "Ult -10e",                   desc: "All weapon Ultimate costs reduced by 10 energy." },
+  // Survival branch — HP & sustain
+  { key: "survival_t1",   branch: "survival",  tier: 1, cost: 40,  name: "+5 max HP",           desc: "Start every run with 5 extra max HP." },
+  { key: "survival_t2",   branch: "survival",  tier: 2, cost: 120, name: "+10 max HP",          desc: "Start every run with 10 extra max HP." },
+  { key: "survival_t3",   branch: "survival",  tier: 3, cost: 250, name: "Free starter relic",  desc: "Start every run with 1 free common relic." },
+  // Economy branch — gold & shop
+  { key: "economy_t1",    branch: "economy",   tier: 1, cost: 40,  name: "+10g start",          desc: "Start every run with 10 extra gold." },
+  { key: "economy_t2",    branch: "economy",   tier: 2, cost: 120, name: "+5g per battle",      desc: "+5 gold per battle win." },
+  { key: "economy_t3",    branch: "economy",   tier: 3, cost: 250, name: "Shop discount 20%",   desc: "All shop prices reduced by 20%." },
+  // Combat branch — damage & energy
+  { key: "combat_t1",     branch: "combat",    tier: 1, cost: 40,  name: "+2 base dmg",         desc: "+2 damage to all attacks." },
+  { key: "combat_t2",     branch: "combat",    tier: 2, cost: 120, name: "+5 energy/turn",      desc: "+5 energy regen per round." },
+  { key: "combat_t3",     branch: "combat",    tier: 3, cost: 250, name: "Start with 30e",      desc: "Start each battle with 30 energy." },
+  // Luck branch — relic quality (replaces old Abilities branch)
+  { key: "luck_t1",       branch: "luck",      tier: 1, cost: 40,  name: "+10% rare chance",    desc: "+10% rare relic chance at shops/drops." },
+  { key: "luck_t2",       branch: "luck",      tier: 2, cost: 120, name: "+1 relic choice",     desc: "+1 option at elite relic picks." },
+  { key: "luck_t3",       branch: "luck",      tier: 3, cost: 250, name: "Start with random rare", desc: "Start every run with 1 random rare relic." },
 ];
 
 /** Empty forge map -- all 12 nodes locked. */
@@ -81,6 +80,7 @@ function defaultMeta() {
   return {
     wallet: null,
     shards: 0,
+    gems: 0,                                // bought w/ NIM; entry currency for Weekly Gauntlet
     forge: emptyForge(),
     ascension: 0,
     ch1Cleared: false,
@@ -109,6 +109,7 @@ function loadMeta() {
     // Clamp ascension into valid range
     merged.ascension = Math.max(0, Math.min(5, Number(merged.ascension) || 0));
     merged.shards = Math.max(0, Math.floor(Number(merged.shards) || 0));
+    merged.gems = Math.max(0, Math.floor(Number(merged.gems) || 0));
     merged.ch1Cleared = Boolean(merged.ch1Cleared);
     // P4: ensure weaponsUnlocked is a clean array w/ sword guaranteed.
     // Old saves (pre-P4) won't have this field -- default to sword only.

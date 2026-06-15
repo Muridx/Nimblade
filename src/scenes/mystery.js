@@ -1,15 +1,15 @@
 // src/scenes/mystery.js
 //
-// M9: Mystery node scene per Design Doc §6.3.
+// v3.0 MYS: Mystery node scene per Bible §8 + Design Lock v2.3 Q3.
 //
 // On mount we roll one of 6 events from MYSTERY_EVENTS, render its blurb +
-// describeOffer(), and show two buttons:
-//   PRIMARY   -- accept the offer (event-specific). Calls event.primary.apply()
-//   SECONDARY -- LEAVE (returns to map). Disabled for Bandit Ambush.
+// describeOffer(), and show action buttons:
+//   PRIMARY   -- main action (event-specific). Calls event.primary.apply()
+//   SECONDARY -- alt action if event defines one (Hidden Vault: take gold,
+//                Bandit Ambush: flee for 10g). Falls back to LEAVE if absent.
 //
-// After PRIMARY is committed we show a result line + CONTINUE button that
-// returns to the map. For Bandit Ambush the apply() returns a transition
-// object and we mount the battle scene directly.
+// After an action is committed we show a result line + CONTINUE button that
+// returns to the map. Bandit Ambush fight transitions directly to battle scene.
 
 import { mountScene } from "./sceneManager.js";
 import { getState, setState } from "../state/store.js";
@@ -22,11 +22,8 @@ export function mysteryScene(root) {
     return () => {};
   }
 
-  // Roll event once and stash for this scene mount. We also call initCtx if
-  // present (e.g. Wandering Merchant rolls its relic + price upfront).
+  // Roll event once and stash for this scene mount. Call initCtx if present.
   let event = rollMysteryEvent();
-  // Guard against initCtx returning skip (e.g. relic pool exhausted) -- in
-  // that edge case, re-roll a few times.
   let ctx = {};
   for (let i = 0; i < 6; i++) {
     ctx = event.initCtx ? event.initCtx(run) : {};
@@ -57,8 +54,6 @@ export function mysteryScene(root) {
     if (action === "mystery-accept") {
       if (resolved) return;
       const cur = getState().run;
-      // Re-check disabled state at click time (HP/gold could have changed --
-      // unlikely but defensive).
       if (event.primary.isDisabled && event.primary.isDisabled(cur, ctx)) return;
       const result = event.primary.apply(cur, ctx);
       setState({ run: result.run });
@@ -66,12 +61,32 @@ export function mysteryScene(root) {
       resultMsg = result.message || "";
 
       if (result.transition) {
-        // Bandit ambush: jump straight to battle. The battle scene reads
-        // run.banditAmbushPending to award a bonus relic on victory.
         mountScene(result.transition.scene, root, result.transition.opts || {});
         return;
       }
       render();
+      return;
+    }
+
+    if (action === "mystery-secondary") {
+      if (resolved) return;
+      const cur = getState().run;
+      if (event.secondary && event.secondary.isDisabled && event.secondary.isDisabled(cur, ctx)) return;
+      if (event.secondary && event.secondary.apply) {
+        const result = event.secondary.apply(cur, ctx);
+        setState({ run: result.run });
+        resolved = true;
+        resultMsg = result.message || "";
+
+        if (result.transition) {
+          mountScene(result.transition.scene, root, result.transition.opts || {});
+          return;
+        }
+        render();
+        return;
+      }
+      // No secondary apply = just leave.
+      mountScene("map", root);
       return;
     }
 
@@ -93,9 +108,27 @@ function renderOffer(root, event, ctx, run) {
     : event.primary.label;
   const primaryClass = disabled ? "btn btn--secondary mystery__btn" : "btn btn--primary mystery__btn";
   const primaryAttr = disabled ? "disabled" : `data-action="mystery-accept"`;
-  const leaveBtn = event.secondaryDisabled
-    ? "" // forced fight (bandit)
-    : `<button class="btn btn--secondary mystery__btn" data-action="mystery-leave">LEAVE</button>`;
+
+  // Secondary button: use event.secondary if defined, else generic LEAVE.
+  let secondaryBtn;
+  if (event.secondary) {
+    const secLabel = typeof event.secondary.label === "function"
+      ? event.secondary.label(ctx)
+      : event.secondary.label;
+    const secDisabled = event.secondary.isDisabled && event.secondary.isDisabled(run, ctx);
+    const secClass = secDisabled ? "btn btn--secondary mystery__btn" : "btn btn--secondary mystery__btn";
+    const secAttr = secDisabled ? "disabled" : `data-action="mystery-secondary"`;
+    secondaryBtn = `<button class="${secClass}" ${secAttr}>${secLabel}</button>`;
+  } else if (event.secondaryDisabled) {
+    secondaryBtn = ""; // forced action, no leave
+  } else {
+    secondaryBtn = `<button class="btn btn--secondary mystery__btn" data-action="mystery-leave">LEAVE</button>`;
+  }
+
+  // v3.0: pass run to describeOffer so Bandit Ambush can check gold.
+  const offerHtml = typeof event.describeOffer === "function"
+    ? event.describeOffer(ctx, run)
+    : "";
 
   root.innerHTML = `
     <div class="mystery">
@@ -103,11 +136,11 @@ function renderOffer(root, event, ctx, run) {
         <div class="mystery__icon">${event.icon}</div>
         <div class="mystery__name">${event.name}</div>
         <div class="mystery__blurb">${event.blurb}</div>
-        <div class="mystery__offer">${event.describeOffer(ctx)}</div>
+        <div class="mystery__offer">${offerHtml}</div>
         <div class="mystery__hp">HP: <strong>${run.playerHp || 0}</strong>/${run.playerMaxHp || 100} \u00b7 Gold: <strong>${run.gold || 0}</strong></div>
         <div class="mystery__actions">
           <button class="${primaryClass}" ${primaryAttr}>${primaryLabel}</button>
-          ${leaveBtn}
+          ${secondaryBtn}
         </div>
       </div>
     </div>

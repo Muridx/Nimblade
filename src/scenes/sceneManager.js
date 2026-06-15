@@ -7,6 +7,9 @@ import { shopScene } from "./shop.js";
 import { treasureScene } from "./treasure.js";
 import { mapScene } from "./map.js";
 import { mysteryScene } from "./mystery.js";
+import { crystalShrineScene } from "./crystalShrine.js";
+import { bloodAltarScene } from "./bloodAltar.js";
+import { gauntletScene } from "./gauntlet.js";
 
 const scenes = {
   splash: splashScene,
@@ -18,6 +21,9 @@ const scenes = {
   treasure: treasureScene,
   map: mapScene,
   mystery: mysteryScene,
+  crystal_shrine: crystalShrineScene,
+  blood_altar: bloodAltarScene,
+  gauntlet: gauntletScene,
 };
 
 let currentUnmount = null;

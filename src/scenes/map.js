@@ -9,6 +9,7 @@
 import { mountScene } from "./sceneManager.js";
 import { getState, setState } from "../state/store.js";
 import monstersData from "../data/monsters.json";
+import { hasRelic, trailRationsHeal } from "../data/relicEffects.js";
 
 // 2.7d batch4: boss intel text per `special` mechanic id (data-driven).
 // When player taps the boss node, the travel-confirm modal shows this so they
@@ -40,6 +41,11 @@ const TYPE_ICON = {
   // CSS hue-rotate + "?" badge on the .map__node--mystery class. Murid can
   // drop a dedicated map_node_mystery.png later and we'll just point here.
   mystery: "/assets/map_node_treasure.png",
+  // R7 (M2b): no dedicated art yet -- reuse existing sprites; CSS classes
+  // .map__node--crystal_shrine / --blood_altar / --miniboss can tint/badge.
+  crystal_shrine: "/assets/map_node_treasure.png", // relic shrine -> treasure sprite
+  blood_altar: "/assets/map_node_elite.png",       // risky altar -> elite sprite
+  miniboss: "/assets/map_node_elite.png",          // tough fight -> elite sprite
   // boss handled separately (per-chapter)
 };
 
@@ -51,6 +57,9 @@ const TYPE_LABEL = {
   campfire: "Campfire",
   treasure: "Treasure",
   mystery: "Mystery",
+  crystal_shrine: "Crystal Shrine",
+  blood_altar: "Blood Altar",
+  miniboss: "Miniboss",
   boss: "Boss",
 };
 
@@ -61,7 +70,12 @@ const SVG_TOP_PAD = 48;
 const SVG_BOTTOM_PAD = 48;
 
 function iconForNode(node, chapter) {
-  if (node.type === "boss") return `/assets/map_node_boss_ch${chapter}.png`;
+  if (node.type === "boss") {
+    // R7 (M2b): only ch1 boss art exists today. Use it for CH2/CH3 until
+    // dedicated map_node_boss_ch2/ch3.png are added, then this picks them up.
+    const bossArt = chapter <= 1 ? 1 : 1;
+    return `/assets/map_node_boss_ch${bossArt}.png`;
+  }
   return TYPE_ICON[node.type] || "/assets/map_node_normal.png";
 }
 
@@ -82,19 +96,24 @@ export function mapScene(root) {
   // run.chapter is a string like "CH1" -- extract numeric for asset filenames.
   const chapterRaw = run.chapter || "CH1";
   const chapter = parseInt(String(chapterRaw).replace(/\D/g, ""), 10) || 1;
+  // R7 (M2b): only map_bg_ch1.png exists today -> reuse it for CH2/CH3 until
+  // dedicated backgrounds are added (then widen this set).
+  const mapBgChapter = [1].includes(chapter) ? chapter : 1;
 
   // Local UI state -- pending node selection (waiting for player confirmation).
   let pendingNodeId = null;
 
   const render = () => {
     const map = run.map;
-    const totalFloors = 9;
+    // R7 (M2b): floor count is chapter-dependent (CH1=9, CH2=11, CH3=13).
+    const totalFloors = map.nodes.reduce((mx, n) => Math.max(mx, n.floor), 0)
+      || run.floorMax || 9;
     const containerHeight = SVG_TOP_PAD + SVG_BOTTOM_PAD + (totalFloors - 1) * FLOOR_GAP + NODE_SIZE;
 
     // For each node, compute (xPct, y) in container coords.
     const posMap = {};
     for (const n of map.nodes) {
-      posMap[n.id] = nodePos(n);
+      posMap[n.id] = nodePos(n, totalFloors);
     }
 
     // Determine reachable (next-pick) node ids from current node.
@@ -191,7 +210,7 @@ export function mapScene(root) {
           </div>
         </div>
         <div class="map__scroll" id="mapScroll">
-          <div class="map__canvas" style="height: ${containerHeight}px; background-image: linear-gradient(180deg, rgba(13,7,16,0.55) 0%, rgba(13,7,16,0) 12%, rgba(13,7,16,0) 88%, rgba(13,7,16,0.55) 100%), url('/assets/map_bg_ch${chapter}.png');">
+          <div class="map__canvas" style="height: ${containerHeight}px; background-image: linear-gradient(180deg, rgba(13,7,16,0.55) 0%, rgba(13,7,16,0) 12%, rgba(13,7,16,0) 88%, rgba(13,7,16,0.55) 100%), url('/assets/map_bg_ch${mapBgChapter}.png');">
             ${edgeSvg}
             ${nodesHtml}
             ${playerHtml}
@@ -238,6 +257,12 @@ export function mapScene(root) {
       run.currentNodeId = nodeId;
       run.visitedNodeIds.push(nodeId);
       run.floor = node.floor;
+      // R9: Trail Rations -- heal a few HP each time you enter a new floor.
+      if (hasRelic(run, "trail_rations")) {
+        const __mx = run.playerMaxHp || 100;
+        const __h = Math.min(trailRationsHeal(run), Math.max(0, __mx - (run.playerHp || 0)));
+        if (__h > 0) { run.playerHp = (run.playerHp || 0) + __h; console.log(`[relic] Trail Rations +${__h} HP (floor ${node.floor})`); }
+      }
       setState({ run });
       console.log(`[map] traveled ${nodeId} (${node.type}, floor ${node.floor})`);
 
@@ -246,10 +271,13 @@ export function mapScene(root) {
         normal: "battle",
         elite: "battle",
         boss: "battle",
+        miniboss: "battle",        // R7: standard battle, isMiniboss via node.type
         shop: "shop",
         campfire: "campfire",
         treasure: "treasure",
         mystery: "mystery",
+        crystal_shrine: "crystal_shrine", // R7: CH2 F7 (scene added in M2c)
+        blood_altar: "blood_altar",       // R7: CH3 F7 (scene added in M2c)
       };
       const targetScene = sceneByType[node.type];
       if (targetScene) {
@@ -269,10 +297,13 @@ export function mapScene(root) {
 
 // ---------- Layout helpers ----------
 
-function nodePos(node) {
-  // y: floor 9 near top, floor 1 near bottom.
-  const fromTop = SVG_TOP_PAD + (9 - node.floor) * FLOOR_GAP;
-  const colCount = colCountForFloor(node.floor);
+function nodePos(node, maxFloor = 9) {
+  // y: top floor (boss) near top, floor 1 near bottom. maxFloor varies by
+  // chapter (CH1=9, CH2=11, CH3=13).
+  const fromTop = SVG_TOP_PAD + (maxFloor - node.floor) * FLOOR_GAP;
+  // R7 (M2b): prefer the node-carried colCount (set by mapGen); fall back to
+  // the CH1 lookup for any legacy/in-progress map saved before this update.
+  const colCount = node.colCount || colCountForFloor(node.floor);
   let xPct;
   if (colCount === 1) xPct = 50;
   else if (colCount === 2) xPct = node.col === 0 ? 32 : 68;

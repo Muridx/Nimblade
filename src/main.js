@@ -14,6 +14,8 @@ const app = document.getElementById("app");
 mountScene("splash", app);
 
 // ---- Global cheat console (works in ANY scene) ----
+// v3.0 CHT: Only expose in dev mode (Vite strips this block in production builds).
+if (import.meta.env.DEV) {
 window.cheat = {
   gold: (n) => {
     const run = getState().run;
@@ -90,3 +92,4 @@ window.cheat = {
   ),
 };
 console.log("[NIMBLADE] booted -- cheat.help()");
+} // end DEV-only cheat block

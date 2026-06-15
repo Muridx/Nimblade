@@ -1,4 +1,5 @@
 import { mountScene } from "./sceneManager.js";
+import { next as rngNext } from "../data/rng.js";
 import { getState, setState } from "../state/store.js";
 import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import relicsData from "../data/relics.json" assert { type: "json" };
@@ -28,7 +29,7 @@ function weightedPickWithoutReplacement(pool, n) {
   const picks = [];
   for (let i = 0; i < n && remaining.length > 0; i++) {
     const total = remaining.reduce((s, r) => s + (r.weight || 1), 0);
-    let roll = Math.random() * total;
+    let roll = rngNext() * total;
     let idx = 0;
     for (let j = 0; j < remaining.length; j++) {
       roll -= (remaining[j].weight || 1);

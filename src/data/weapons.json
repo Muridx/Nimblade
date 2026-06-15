@@ -11,13 +11,28 @@
       "guard_win_dmg": 6,
       "counter_win_dmg": 14,
       "counter_loss_dmg_taken": 3,
-      "ws_dmg": 8,
       "ws_cost": 40,
       "ult_cost": 100,
       "energy_regen_per_turn": 20
     },
-    "passive": { "id": "momentum", "name": "Momentum", "description": "+1 permanent dmg buff per basic RPS win (SLASH/COUNTER only). Cap at +5. Resets on any draw or loss. Persists across battles within a run." },
-    "ultimate": { "id": "blade_rush", "name": "Blade Rush", "cost": 100, "description": "Deal 25 dmg, ignore RPS outcome, ignore monster GUARD intent reduction." },
+    "passive": {
+      "id": "relic_synergy",
+      "name": "Relic Synergy",
+      "description": "+1 damage per 3 relics owned."
+    },
+    "weapon_skill": {
+      "id": "riposte",
+      "name": "Riposte",
+      "cost": 40,
+      "action": "COUNTER",
+      "description": "Guaranteed COUNTER. If you win, deal 1.5x damage."
+    },
+    "ultimate": {
+      "id": "blade_storm",
+      "name": "Blade Storm",
+      "cost": 100,
+      "description": "3 consecutive attacks at 0.8x damage each."
+    },
     "unlock": "starter"
   },
   "spear": {
@@ -32,13 +47,28 @@
       "guard_win_dmg": 6,
       "counter_win_dmg": 16,
       "counter_loss_dmg_taken": 2,
-      "ws_dmg": 8,
       "ws_cost": 40,
       "ult_cost": 100,
       "energy_regen_per_turn": 20
     },
-    "passive": { "id": "precise_read", "name": "Precise Read", "description": "COUNTER wins deal +2 dmg (16 -> 18)." },
-    "ultimate": { "id": "foresight", "name": "Foresight", "cost": 100, "description": "Skip current turn (deal 0 dmg, monster acts free), reveal next 2 turns of monster intent at 100% honesty." },
+    "passive": {
+      "id": "first_strike",
+      "name": "First Strike",
+      "description": "+2 damage on first hit each battle."
+    },
+    "weapon_skill": {
+      "id": "thrust",
+      "name": "Thrust",
+      "cost": 40,
+      "action": "SLASH",
+      "description": "Guaranteed SLASH. Deal 1.3x damage regardless of outcome."
+    },
+    "ultimate": {
+      "id": "impale",
+      "name": "Impale",
+      "cost": 100,
+      "description": "Single hit at 2.5x damage. Ignores GUARD."
+    },
     "unlock": { "achievement_id": "spear_max_counter_wins_battle", "threshold": 4, "description": "Win 1 battle with 4+ total COUNTER wins." }
   },
   "axe": {
@@ -53,13 +83,28 @@
       "guard_win_dmg": 6,
       "counter_win_dmg": 14,
       "counter_loss_dmg_taken": 3,
-      "ws_dmg": 8,
-      "ws_cost": 40,
+      "ws_cost": 30,
       "ult_cost": 100,
       "energy_regen_per_turn": 20
     },
-    "passive": { "id": "crit_strike", "name": "Crit Strike", "description": "10% chance on SLASH/COUNTER wins to deal x2 damage." },
-    "ultimate": { "id": "berserk", "name": "Berserk", "cost": 100, "description": "For 2 turns: deal +100% dmg AND take +50% dmg from monster." },
+    "passive": {
+      "id": "crit_strike",
+      "name": "Crit Strike",
+      "description": "20% chance on SLASH/COUNTER wins to deal x2 damage."
+    },
+    "weapon_skill": {
+      "id": "cleave",
+      "name": "Cleave",
+      "cost": 30,
+      "action": "SLASH",
+      "description": "Guaranteed SLASH. If you win, apply Berserk to enemy (2 turns, +50% damage taken)."
+    },
+    "ultimate": {
+      "id": "executioner",
+      "name": "Executioner",
+      "cost": 100,
+      "description": "If enemy below 30% HP, instant kill. Otherwise deal 2x damage."
+    },
     "unlock": { "achievement_id": "axe_max_turn_dmg", "threshold": 30, "description": "Deal 30+ dmg in a single turn (any run)." }
   },
   "staff": {
@@ -74,13 +119,28 @@
       "guard_win_dmg": 6,
       "counter_win_dmg": 12,
       "counter_loss_dmg_taken": 3,
-      "ws_dmg": 10,
-      "ws_cost": 35,
-      "ult_cost": 85,
+      "ws_cost": 40,
+      "ult_cost": 100,
       "energy_regen_per_turn": 20
     },
-    "passive": { "id": "arcane_recovery", "name": "Arcane Recovery", "description": "+1 HP per basic RPS win (SLASH/GUARD/COUNTER wins only). No cap." },
-    "ultimate": { "id": "purify", "name": "Purify", "cost": 85, "description": "Heal 15 HP and restore 40 energy. Enables cycle-ult mage rotation." },
+    "passive": {
+      "id": "energy_guard",
+      "name": "Energy Guard",
+      "description": "+5 energy on GUARD wins."
+    },
+    "weapon_skill": {
+      "id": "purify",
+      "name": "Purify",
+      "cost": 40,
+      "action": "GUARD",
+      "description": "Guaranteed GUARD. Clear all debuffs. No energy refund."
+    },
+    "ultimate": {
+      "id": "arcane_blast",
+      "name": "Arcane Blast",
+      "cost": 100,
+      "description": "Deal 2x damage and heal 15 HP."
+    },
     "unlock": { "achievement_id": "staff_max_ult_per_run", "threshold": 3, "description": "Use Ultimate 3 times in a single battle." }
   }
 }

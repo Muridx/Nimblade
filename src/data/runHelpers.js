@@ -26,8 +26,51 @@
  */
 
 import { getState, setState } from "../state/store.js";
+import { NODE_LAYOUTS } from "./floorMap.js";
+import { generateMap } from "./mapGen.js";
 
 const SHARD_RATIO = 0.20; // §7.1
+
+const CHAPTER_ORDER = ["CH1", "CH2", "CH3"];
+
+/**
+ * v3.0 R0: Advance the run to the next chapter after a boss clear.
+ *
+ * Mutates and returns the run. Does NOT commit to state — caller does that.
+ *
+ * What it does (per Bible §5 + Design Lock F7):
+ *   1. chapter++ (CH1→CH2, CH2→CH3)
+ *   2. floorMax = NODE_LAYOUTS[newChapter].length
+ *   3. floor = 1
+ *   4. playerHp = CARRIED OVER (persistent across the whole run, STS-style)
+ *   5. energy   = CARRIED OVER (persistent across the whole run)
+ *   6. map = generateMap() (fresh DAG for new chapter)
+ *   7. currentNodeId / visitedNodeIds reset
+ *   8. normalQueue reset (new chapter pool)
+ *
+ * Returns null if already on CH3 (no next chapter — run is complete).
+ */
+export function advanceChapter(run) {
+  if (!run) return null;
+  const curIdx = CHAPTER_ORDER.indexOf((run.chapter || "CH1").toUpperCase());
+  if (curIdx < 0 || curIdx >= CHAPTER_ORDER.length - 1) return null; // already final chapter
+
+  const nextCh = CHAPTER_ORDER[curIdx + 1];
+  const layout = NODE_LAYOUTS[nextCh];
+
+  run.chapter = nextCh;
+  run.floor = 1;
+  run.floorMax = layout ? layout.length : 9;
+  // HP and energy are NOT touched here -- they persist across the whole run
+  // (carried over from the run state, STS-style). Death is the only reset.
+  run.map = generateMap(undefined, run.ascension || 0, nextCh);
+  run.currentNodeId = null;
+  run.visitedNodeIds = [];
+  run.normalQueue = null;
+  run.normalQueueChapter = null;
+
+  return run;
+}
 
 const ASCENSION_MULT = {
   0: 1.0,
@@ -67,13 +110,23 @@ export function addRunGold(run, amount) {
  */
 export function payoutShards({ run, isCh1BossClear = false } = {}) {
   if (!run) return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false };
+  // DEMO MODE: demo runs are wallet-free trials and must NEVER earn shards or
+  // unlock progression -- otherwise players farm shards in demo with OP weapons.
+  // Real (wallet-connected) runs use mode "full". Gate here = single source of truth.
+  if (run.mode === "demo") {
+    run.shardsPaidOut = true;
+    return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false, demo: true };
+  }
   if (run.shardsPaidOut) {
     return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false };
   }
   const ascLevel = Math.max(0, Math.min(5, Number(run.ascension) || 0));
   const ascMult = ASCENSION_MULT[ascLevel] || 1.0;
   const totalEarned = Math.max(0, Number(run.totalGoldEarned) || 0);
-  const shardsEarned = Math.floor(totalEarned * SHARD_RATIO * ascMult);
+  // R7 Crystal Shrine option C: +50% shard bonus at run end. Stored on the
+  // run as `shardBonusMult` (additive, e.g. 0.5 => x1.5 final payout).
+  const shrineMult = 1 + Math.max(0, Number(run.shardBonusMult) || 0);
+  const shardsEarned = Math.floor(totalEarned * SHARD_RATIO * ascMult * shrineMult);
 
   const meta = getState().meta || {};
   let ch1Unlocked = false;

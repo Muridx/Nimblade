@@ -133,7 +133,7 @@ export function weaponSelectScene(root) {
             <span>SLASH</span><strong>${w.stats.slash_dmg}</strong>
             <span>COUNTER</span><strong>${w.stats.counter_win_dmg}</strong>
             <span>GUARD</span><strong>${w.stats.guard_dmg_reduction_pct}%</strong>
-            <span>WS</span><strong>${w.stats.ws_dmg}/${w.stats.ws_cost}</strong>
+            <span>${w.weapon_skill.name.toUpperCase()}</span><strong>${w.stats.ws_cost}e</strong>
           </div>
           <div class="ws__passive"><strong>${w.passive.name}:</strong> ${w.passive.description}</div>
           <div class="ws__ult"><strong>ULT - ${w.ultimate.name} (${w.ultimate.cost}):</strong> ${w.ultimate.description}</div>

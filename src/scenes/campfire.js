@@ -1,4 +1,5 @@
 import { mountScene } from "./sceneManager.js";
+import { next as rngNext } from "../data/rng.js";
 import { getState, setState } from "../state/store.js";
 import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import { renderRunInfoModalHTML } from "../ui/runInfoModal.js";
@@ -63,7 +64,7 @@ export function campfireScene(root) {
           : `+0 HP (already full at ${maxHp}/${maxHp})`,
       };
     } else if (sceneState.pendingChoice === "SMOKE") {
-      const win = Math.random() < 0.5;
+      const win = rngNext() < 0.5;
       if (win) {
         addRunGold(newRun, 24); // M2: also bumps totalGoldEarned
         sceneState.resolved = { kind: "SMOKE_WIN", text: `+24 gold (lucky -- now ${newRun.gold})` };
