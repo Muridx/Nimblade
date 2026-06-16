@@ -9,6 +9,7 @@ import {
   forgeStartGoldBonus,
   forgeStartEnergyBonus,
   forgeStarterRelicId,
+  forgeLuckStarterRareId,
   describeRunInitEffects,
 } from "../data/forgeEffects.js";
 import { acquireRelic } from "../data/relicEffects.js";
@@ -82,12 +83,26 @@ let dailyAutoShownFor = null;
 // visible flag. Reset on scene mount like the other modals.
 let howtoOpen = false;
 
+// B (onboarding): first-run name-entry screen. Shown ONCE, the very first
+// time a player lands in the lobby on this device. After they confirm/skip we
+// set the onboarded flag and auto-open How to Play once so the core duel rules
+// are guaranteed to be seen even by a cold player who'd never tap the card.
+let namePromptOpen = false;
+const LS_ONBOARDED_KEY = "nbl_onboarded_v1";
+function isOnboarded() {
+  try { return localStorage.getItem(LS_ONBOARDED_KEY) === "1"; }
+  catch (_) { return true; } // storage blocked -> don't nag every load
+}
+function setOnboarded() {
+  try { localStorage.setItem(LS_ONBOARDED_KEY, "1"); } catch (_) {}
+}
+
 // M4: branch metadata for forge modal layout. Ordered left->right.
 const FORGE_BRANCHES = [
   { key: "survival",  icon: "\u2764\ufe0f", label: "SURVIVAL"  },
   { key: "economy",   icon: "\ud83d\udcb0", label: "ECONOMY"   },
   { key: "combat",    icon: "\u2694\ufe0f", label: "COMBAT"    },
-  { key: "abilities", icon: "\u26a1",       label: "ABILITIES" },
+  { key: "luck",      icon: "\ud83c\udf40",     label: "LUCK"      },
 ];
 
 export function lobbyScene(root) {
@@ -105,6 +120,10 @@ export function lobbyScene(root) {
   dailyClaiming = false;
   dailyClaimResult = null;
   howtoOpen = false;
+  // B (onboarding): very first lobby visit on this device -> pop the name
+  // prompt. Everything else (auto-opening How to Play) is chained from the
+  // prompt's confirm/skip handlers.
+  namePromptOpen = !isOnboarded();
   render(root);
   // Fire-and-forget daily status refresh if wallet connected. Triggers a
   // re-render to show the "!" badge + auto-popup the modal once per day.
@@ -377,6 +396,34 @@ export function lobbyScene(root) {
     if (action === "howto-stop") {
       return; // swallow clicks inside the modal card
     }
+
+    // B (onboarding): first-run name prompt handlers.
+    //   onb-save-name -> save the typed name, mark onboarded, auto-open guide.
+    //   onb-skip      -> skip naming (stays Anonymous) but still see the guide.
+    //   onb-stop      -> swallow taps inside the card.
+    // Note: the onboarding overlay has NO backdrop dismiss action on purpose,
+    // so a cold player must make a choice and can't accidentally skip the
+    // guide by tapping outside.
+    if (action === "onb-save-name") {
+      const input = root.querySelector(".onb__name-input");
+      const newName = input ? input.value : "";
+      setDisplayName(newName);
+      setOnboarded();
+      namePromptOpen = false;
+      howtoOpen = true; // chain straight into the tutorial, shown once
+      render(root);
+      return;
+    }
+    if (action === "onb-skip") {
+      setOnboarded();
+      namePromptOpen = false;
+      howtoOpen = true;
+      render(root);
+      return;
+    }
+    if (action === "onb-stop") {
+      return; // swallow clicks inside the onboarding card
+    }
   };
 
   root.addEventListener("click", onClick);
@@ -416,17 +463,17 @@ function render(root) {
   //   - Not unlocked: "\ud83d\udd12 Locked" + dimmed card
   //   - Standard (lvl 0): "Standard"
   //   - Lvl 1-5: "Tier N \u00b7 xMULT" with gold accent border
-  let ascSub, ascCardClass;
+  let ascSub, ascChipClass;
   if (!ch1Cleared) {
     ascSub = "\ud83d\udd12 Locked";
-    ascCardClass = "lobby__card lobby__card--locked";
+    ascChipClass = "lobby__chip lobby__chip--locked";
   } else if (ascLevel === 0) {
     ascSub = "Standard";
-    ascCardClass = "lobby__card";
+    ascChipClass = "lobby__chip";
   } else {
     const mult = ASCENSION_LEVELS[ascLevel].shardMult.toFixed(2);
     ascSub = `Tier ${ascLevel} \u00b7 x${mult}`;
-    ascCardClass = "lobby__card lobby__card--accent";
+    ascChipClass = "lobby__chip lobby__chip--accent";
   }
 
   // M4: forge modal HTML appended at end of lobby (covers screen when forgeOpen).
@@ -439,6 +486,8 @@ function render(root) {
   const dailyModalHTML = dailyOpen ? renderDailyModalHTML(meta) : "";
   // P3d: How to Play overlay -- static tutorial, no data deps.
   const howtoModalHTML = howtoOpen ? renderHowToModalHTML() : "";
+  // B (onboarding): first-run name prompt -- injected last so it sits on top.
+  const namePromptHTML = namePromptOpen ? renderNamePromptHTML() : "";
 
   // P3b: daily login pill. Sits between SHARDS and WALLET in the top bar.
   //   - Wallet not connected -> hidden entirely (no point teasing).
@@ -469,8 +518,19 @@ function render(root) {
   //   - CTA stack at bottom: START RUN (premium gold) + TRY DEMO (ghost glass)
   //     + demo hint
   // All chip clutter from M3 is gone; menu lives in cards instead.
+  // Ambient ember particles drifting up over the tavern scene (decorative).
+  let emberHTML = "";
+  for (let i = 0; i < 14; i++) {
+    const left = (Math.random() * 100).toFixed(2);
+    const dur = (5 + Math.random() * 5).toFixed(2);
+    const delay = (-Math.random() * 8).toFixed(2);
+    const size = (2 + Math.random() * 2).toFixed(2);
+    emberHTML += `<i class="ember" style="left:${left}%;width:${size}px;height:${size}px;animation-duration:${dur}s;animation-delay:${delay}s"></i>`;
+  }
+
   root.innerHTML = `
     <div class="lobby">
+      <div class="lobby__embers" aria-hidden="true">${emberHTML}</div>
       <div class="lobby__top">
         <div class="lobby__shards" role="button" tabindex="0" data-action="open-forge" aria-label="Shards (${shards})">
           <div class="lobby__shards-icon">\ud83d\udc8e</div>
@@ -493,49 +553,51 @@ function render(root) {
         <div class="lobby__tagline">A Roguelite Duel</div>
       </div>
 
-      <div class="lobby__menu">
-        <div class="lobby__card lobby__card--wide lobby__card--howto" role="button" tabindex="0" data-action="open-howto">
-          <div class="lobby__card-icon">\ud83d\udcd6</div>
-          <div class="lobby__card-howto-text">
-            <div class="lobby__card-label">HOW TO PLAY</div>
-            <div class="lobby__card-sub">New here? Learn the duel in 2 min</div>
+      <div class="lobby__bottom">
+        <div class="lobby__chips">
+          <div class="lobby__chip" role="button" tabindex="0" data-action="open-forge" aria-label="Forge">
+            <div class="lobby__chip-icon">\u2692\ufe0f</div>
+            <div class="lobby__chip-label">FORGE</div>
+          </div>
+          <div class="${ascChipClass}" role="button" tabindex="0" data-action="open-ascension" aria-label="Ascension (${ascSub})">
+            <div class="lobby__chip-icon">\ud83c\udf1f</div>
+            <div class="lobby__chip-label">ASCEND</div>
+          </div>
+          <div class="lobby__chip" role="button" tabindex="0" data-action="open-leaderboard" aria-label="Leaderboard">
+            <div class="lobby__chip-icon">\ud83c\udfc6</div>
+            <div class="lobby__chip-label">RANKS</div>
+          </div>
+          <div class="lobby__chip" role="button" tabindex="0" data-action="open-settings" aria-label="Settings">
+            <div class="lobby__chip-icon">\u2699\ufe0f</div>
+            <div class="lobby__chip-label">SETTINGS</div>
           </div>
         </div>
-        <div class="lobby__card" role="button" tabindex="0" data-action="open-forge">
-          <div class="lobby__card-icon">\u2692\ufe0f</div>
-          <div class="lobby__card-label">FORGE</div>
-          <div class="lobby__card-sub">Meta Upgrades</div>
-        </div>
-        <div class="${ascCardClass}" role="button" tabindex="0" data-action="open-ascension">
-          <div class="lobby__card-icon">\ud83c\udf1f</div>
-          <div class="lobby__card-label">ASCENSION</div>
-          <div class="lobby__card-sub">${ascSub}</div>
-        </div>
-        <div class="lobby__card" role="button" tabindex="0" data-action="open-leaderboard">
-          <div class="lobby__card-icon">\ud83c\udfc6</div>
-          <div class="lobby__card-label">LEADERBOARD</div>
-          <div class="lobby__card-sub">Global Ranks</div>
-        </div>
-        <div class="lobby__card" role="button" tabindex="0" data-action="open-settings">
-          <div class="lobby__card-icon">\u2699\ufe0f</div>
-          <div class="lobby__card-label">SETTINGS</div>
-          <div class="lobby__card-sub">Name \u00b7 Audio \u00b7 Reset</div>
-        </div>
-      </div>
 
-      <div class="lobby__cta">
-        <button class="btn btn--primary lobby__btn-start" data-action="start-run">
-          <span class="cta__label">START RUN</span>
-          <span class="cta__sub">Full run \u00b7 all chapters</span>
-        </button>
-        <button class="btn btn--secondary lobby__btn-demo" data-action="try-demo">
-          <span class="cta__label">TRY DEMO</span>
-          <span class="cta__sub">Chapter 1 only \u00b7 no wallet</span>
-        </button>
-        <button class="btn lobby__btn-gauntlet" data-action="open-gauntlet">
-          <span class="cta__label">\u2694\ufe0f WEEKLY GAUNTLET</span>
-          <span class="cta__sub">Skill tournament \u00b7 NIM entry</span>
-        </button>
+        <div class="lobby__howto" role="button" tabindex="0" data-action="open-howto">
+          <span class="lobby__howto-icon">\ud83d\udcd6</span>
+          <div class="lobby__howto-text">
+            <div class="lobby__howto-title">HOW TO PLAY</div>
+            <div class="lobby__howto-sub">New here? Learn the duel in 1 min</div>
+          </div>
+          <span class="lobby__howto-arrow">\u203a</span>
+        </div>
+
+        <div class="lobby__cta">
+          <button class="lobby__btn-start" data-action="start-run">
+            <span class="cta__label">START RUN</span>
+            <span class="cta__sub">Full run \u00b7 all chapters</span>
+          </button>
+          <div class="lobby__cta-row">
+            <button class="lobby__btn-demo" data-action="try-demo">
+              <span class="cta__label">TRY DEMO</span>
+              <span class="cta__sub">Chapter 1 \u00b7 no wallet</span>
+            </button>
+            <button class="lobby__btn-gauntlet" data-action="open-gauntlet">
+              <span class="cta__label">\u2694\ufe0f GAUNTLET</span>
+              <span class="cta__sub">Weekly \u00b7 NIM entry</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       ${forgeModalHTML}
@@ -543,6 +605,29 @@ function render(root) {
       ${lbModalHTML}
       ${dailyModalHTML}
       ${howtoModalHTML}
+      ${namePromptHTML}
+    </div>
+  `;
+}
+
+/**
+ * B (onboarding): first-run name-entry overlay. Shown once on the very first
+ * lobby visit. Reuses the forge overlay/card scaffolding to keep CSS small.
+ * Deliberately has NO backdrop dismiss so the player makes a choice; both
+ * buttons chain into the How to Play guide via their handlers.
+ */
+function renderNamePromptHTML() {
+  const name = getDisplayName();
+  return `
+    <div class="lobby__toast forge__overlay">
+      <div class="forge__card onb__card" data-action="onb-stop">
+        <div class="onb__logo" role="img" aria-label="NIMBLADE"></div>
+        <div class="onb__welcome">Welcome, duelist</div>
+        <p class="onb__lead">Before you climb, what should the leaderboard call you?</p>
+        <input class="onb__name-input" type="text" maxlength="24" placeholder="Your name" value="${escapeHTML(name)}" />
+        <button class="btn btn--primary onb__go" data-action="onb-save-name">LET'S GO \u2694\ufe0f</button>
+        <button class="btn onb__skip" data-action="onb-skip">Skip for now</button>
+      </div>
     </div>
   `;
 }
@@ -754,25 +839,29 @@ function renderHowToModalHTML() {
           <p>Same move = a draw, nobody takes damage. <strong>Win the clash and you deal damage; lose it and you take damage.</strong> It all comes down to out-guessing your opponent.</p>
 
           <div class="htp__h">\ud83d\udc41\ufe0f Reading Your Enemy</div>
-          <p>Above the enemy you'll see its <strong>INTENT</strong> \u2014 the move it plans to make. But beware: enemies <strong>bluff</strong>. A sneaky enemy shows a fake intent to bait you, and tougher enemies lie more often. Two ways to beat the bluff:</p>
+          <p>Above the enemy you'll see its <strong>INTENT</strong> \u2014 the move it's hinting at. But beware: enemies <strong>bluff</strong>. A sneaky enemy shows a fake intent to bait you, and tougher enemies lie more often. Three ways to outplay them:</p>
           <ul class="htp__list">
-            <li><strong>\ud83d\udd0e READ</strong> (costs 60 energy) \u2014 reveals the enemy's TRUE move this turn.</li>
-            <li><strong>Learn the PATTERN</strong> \u2014 every enemy follows a fixed sequence of moves. Watch a few turns and you'll predict them even when they bluff. <em>This is the real skill of NIMBLADE.</em></li>
+            <li><strong>\ud83d\udd0e READ</strong> (costs 50 energy) \u2014 reveals the enemy's TRUE move this turn. No guessing.</li>
+            <li><strong>Learn its LEAN</strong> \u2014 every enemy favours some moves more than others (a defensive foe guards a lot; a savage one slashes). It's not a fixed script \u2014 but over a fight you'll feel which way it leans and bet smarter. <em>This is the real skill of NIMBLADE.</em></li>
+            <li><strong>Mind the streak</strong> \u2014 no enemy throws the same move three times in a row, so right after a double you can safely rule that move out.</li>
           </ul>
+
+          <div class="htp__h">\ud83c\udf2b\ufe0f Veiled Foes</div>
+          <p>Some enemies hide their hand. The <strong>Hooded Sister</strong> clouds her intent so each turn you only see <strong>two</strong> of the three moves she might throw (shown like <em>"\u2753 GUARD or SLASH?"</em>). You're never fully blind \u2014 against any two moves there's always a pick that <strong>can't lose</strong>, so play it safe or gamble on her lean for the win. A \ud83d\udd0e READ or a reveal relic pierces the veil completely.</p>
 
           <div class="htp__h">\u26a1 Energy, Skills &amp; Ultimate</div>
           <p>You gain 20 energy each turn (max 100). Spend it on:</p>
           <ul class="htp__list">
-            <li><strong>READ</strong> (60) \u2014 see the true intent.</li>
+            <li><strong>READ</strong> (50) \u2014 see the true intent.</li>
             <li><strong>Weapon SKILL</strong> (30\u201340) \u2014 a special guaranteed move.</li>
             <li><strong>ULTIMATE</strong> (100) \u2014 your most powerful attack.</li>
           </ul>
 
           <div class="htp__h">\ud83d\udca1 Example 1 \u2014 a real turn</div>
-          <div class="htp__ex">The enemy shows \ud83d\udee1\ufe0f GUARD. Your instinct might be to SLASH \u2014 but GUARD beats SLASH, so you'd lose! Instead you play \ud83c\udf00 COUNTER, because COUNTER beats GUARD. You win the clash and deal damage. If you're not sure the GUARD is honest, spend 60 energy on \ud83d\udd0e READ first to see the truth before you commit.</div>
+          <div class="htp__ex">The enemy shows \ud83d\udee1\ufe0f GUARD. Your instinct might be to SLASH \u2014 but GUARD beats SLASH, so you'd lose! Instead you play \ud83c\udf00 COUNTER, because COUNTER beats GUARD. You win the clash and deal damage. If you're not sure the GUARD is honest, spend 50 energy on \ud83d\udd0e READ first to see the truth before you commit.</div>
 
-          <div class="htp__h">\ud83d\udca1 Example 2 \u2014 using the pattern</div>
-          <div class="htp__ex">Say the Cave Troll always cycles SLASH \u2192 SLASH \u2192 GUARD \u2192 COUNTER, then repeats. Once you spot it, you know turn 3 is GUARD \u2014 so you throw COUNTER and win, no READ needed. Now you can save your energy for your Ultimate. Reading patterns turns "luck" into a sure thing.</div>
+          <div class="htp__h">\ud83d\udca1 Example 2 \u2014 playing the lean</div>
+          <div class="htp__ex">You've noticed the Cave Troll loves to SLASH \u2014 it's thrown it most of the fight. This turn its INTENT shows \ud83d\udee1\ufe0f GUARD, but that smells like a bait. You trust its lean and play \ud83d\udee1\ufe0f GUARD yourself (GUARD beats SLASH) \u2014 and it slashes straight into your guard. Reading an enemy's tendencies turns guesswork into an edge. Still unsure? Spend 50 energy on \ud83d\udd0e READ and remove all doubt.</div>
 
           <div class="htp__h">\ud83d\udddd\ufe0f Weapons</div>
           <p>You start with the <strong>SWORD</strong> (balanced). Completing challenges unlocks the <strong>SPEAR</strong> (counter master), <strong>AXE</strong> (heavy hitter), and <strong>STAFF</strong> (magic &amp; healing). Each weapon has its own Skill and Ultimate.</p>
@@ -786,7 +875,7 @@ function renderHowToModalHTML() {
           <div class="htp__h">\ud83c\udf1f After the Run</div>
           <p>Win or lose, you earn <strong>Shards</strong>. Spend them in the <strong>FORGE</strong> for permanent upgrades that carry across every run. Want a tougher challenge with bigger rewards? Raise your <strong>ASCENSION</strong> level.</p>
 
-          <div class="htp__tip">NIMBLADE isn't about luck \u2014 it's about reading your opponent. Lose a fight? You weren't unlucky, you got out-read. Watch the patterns, manage your energy, and you'll climb higher every run. Good luck! \u2694\ufe0f</div>
+          <div class="htp__tip">NIMBLADE isn't about luck \u2014 it's about reading your opponent. Lose a fight? You weren't unlucky, you got out-read. Read their tendencies, manage your energy, and you'll climb higher every run. Good luck! \u2694\ufe0f</div>
         </div>
 
         <button class="btn btn--primary htp__got" data-action="howto-close">GOT IT</button>
@@ -1057,7 +1146,7 @@ function freshRun(mode) {
   const meta = getState().meta || {};
   const hpBonus     = forgeMaxHpBonus(meta);       // survival_t1 -> +5
   const goldBonus   = forgeStartGoldBonus(meta);   // economy_t1  -> +10
-  const energyBonus = forgeStartEnergyBonus(meta); // abilities_t2 -> +20
+  const energyBonus = forgeStartEnergyBonus(meta); // legacy shim -> always 0 (combat_t3 covers battle-start energy)
   // M6: Asc 3+ -- start with -10 max HP. Applied AFTER forge bonus so the
   // two stack predictably (e.g. Survival T1 + Asc 3 = +5 - 10 = -5 net).
   const ascLevel = clampAsc(meta.ascension);
@@ -1085,7 +1174,7 @@ function freshRun(mode) {
     energy: 0 + energyBonus,
     momentumStacks: 0,
     berserkTurns: 0,
-    readUses: 3,
+    readUses: 4,
     normalQueue: null,
     normalQueueChapter: null,
     map: generateMap(undefined, ascLevel),
@@ -1100,6 +1189,13 @@ function freshRun(mode) {
   const starterId = forgeStarterRelicId(meta);
   if (starterId) {
     run = acquireRelic(run, starterId);
+  }
+
+  // LUCK T3 -- start every run with 1 random RARE relic. Same routing as the
+  // survival_t3 common starter, but draws from the rares pool.
+  const starterRareId = forgeLuckStarterRareId(meta);
+  if (starterRareId) {
+    run = acquireRelic(run, starterRareId);
   }
 
   // Debug: log applied effects to console so QA can verify wiring.

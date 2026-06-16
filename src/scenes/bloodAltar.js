@@ -126,7 +126,7 @@ export function bloodAltarScene(root) {
         { rows: [["Mode", cur.mode || "demo"], ["Floor", `${floor}/${floorMax}`], ["Gold", gold]] },
         { title: "CARRY-OVER (LIVE)", rows: [
           ["HP", `${hp}/${maxHp}`], ["Energy", cur.energy || 0],
-          ["SHARPEN buffs", buffStr], ["STUDY uses left", `${cur.readUses || 0}/3`],
+          ["SHARPEN buffs", buffStr], ["STUDY uses left", `${cur.readUses || 0}/4`],
         ] },
       ],
       relicIds: cur.relics || [],

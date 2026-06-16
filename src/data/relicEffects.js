@@ -147,9 +147,10 @@ export function berserkerStoneSelfDmg(run, turn) {
   return (turn >= 1 && turn <= 5) ? 2 : 0;
 }
 
-// Runic Compass: passive flag for upcoming map UI (no gameplay effect yet).
-export function hasRunicCompass(run) {
-  return hasRelic(run, "runic_compass");
+// Tactician's Banner: on a GUARD win, gain energy. Rewards correctly reading
+// the enemy's SLASH and blocking it; fuels weapon skills / ultimates.
+export function tacticiansBannerEnergy(run) {
+  return hasRelic(run, "tacticians_banner") ? 10 : 0;
 }
 
 // ---- 2.7c-3 EPICS -----------------------------------------------------------

@@ -5,7 +5,7 @@ import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import relicsData from "../data/relics.json" assert { type: "json" };
 import { acquireRelic } from "../data/relicEffects.js";
 import { renderRunInfoModalHTML } from "../ui/runInfoModal.js";
-import { forgeShopDiscount } from "../data/forgeEffects.js";
+import { forgeShopDiscount, forgeLuckRareBonus } from "../data/forgeEffects.js";
 
 /**
  * Shop scene (2.7b-3 v2): 2 commons + 1 rare + heal potion stepper.
@@ -41,19 +41,57 @@ function weightedPickWithoutReplacement(pool, n) {
   return picks;
 }
 
-function rollShopRelics(discount = 0) {
-  const commons = relicsData.commons || [];
-  const rares = relicsData.rares || [];
-  const commonPicks = weightedPickWithoutReplacement(commons, 2);
-  commonPicks.sort((a, b) => (COMMON_SUBTIER_RANK[b.subtier] || 0) - (COMMON_SUBTIER_RANK[a.subtier] || 0));
-  const rarePicks = weightedPickWithoutReplacement(rares, 1);
+// Pick one weighted-random entry from a pool array WITHOUT replacement
+// (mutates the array). Returns null if the pool is empty.
+function pickFromPool(pool) {
+  if (pool.length === 0) return null;
+  const total = pool.reduce((s, r) => s + (r.weight || 1), 0);
+  let roll = rngNext() * total;
+  let idx = 0;
+  for (let j = 0; j < pool.length; j++) {
+    roll -= (pool[j].weight || 1);
+    if (roll <= 0) { idx = j; break; }
+  }
+  return pool.splice(idx, 1)[0];
+}
+
+function rollShopRelics(discount = 0, rareBonus = 0) {
+  // Work on copies so without-replacement is shared across the rare slot AND
+  // any common slots that get upgraded to rare (no dup rares).
+  const commonsPool = [...(relicsData.commons || [])];
+  const raresPool = [...(relicsData.rares || [])];
   // M5b: Economy T2 forge -- apply discount fraction to relic prices.
   // Ceil + min 1g so 1g rare items can't be free-exploited.
   const applyDisc = (p) => Math.max(1, Math.ceil(p * (1 - discount)));
-  const items = [
-    ...commonPicks.map((r) => ({ kind: "relic", relic: r, price: applyDisc(COMMON_PRICE[r.subtier] || 30), sold: false })),
-    ...rarePicks.map((r) => ({ kind: "relic", relic: r, price: applyDisc(RARE_PRICE_BY_WEIGHT[r.weight] || 75), sold: false })),
-  ];
+  const priceFor = (r, isRare) =>
+    applyDisc(isRare ? (RARE_PRICE_BY_WEIGHT[r.weight] || 75) : (COMMON_PRICE[r.subtier] || 30));
+
+  // Guaranteed rare slot (always present).
+  const guaranteedRare = pickFromPool(raresPool);
+
+  // 2 "common" slots -- LUCK T1 gives EACH a `rareBonus` chance to upgrade to
+  // a rare instead of a common.
+  const commonSlots = [];
+  for (let i = 0; i < 2; i++) {
+    if (rareBonus > 0 && raresPool.length > 0 && rngNext() < rareBonus) {
+      const r = pickFromPool(raresPool);
+      if (r) { commonSlots.push({ relic: r, rare: true }); continue; }
+    }
+    const c = pickFromPool(commonsPool);
+    if (c) commonSlots.push({ relic: c, rare: false });
+  }
+  // Display order: rares first, then commons by subtier (strong > junk).
+  commonSlots.sort((a, b) => {
+    if (a.rare !== b.rare) return a.rare ? -1 : 1;
+    return (COMMON_SUBTIER_RANK[b.relic.subtier] || 0) - (COMMON_SUBTIER_RANK[a.relic.subtier] || 0);
+  });
+
+  const items = commonSlots.map((s) => ({
+    kind: "relic", relic: s.relic, price: priceFor(s.relic, s.rare), sold: false,
+  }));
+  if (guaranteedRare) {
+    items.push({ kind: "relic", relic: guaranteedRare, price: priceFor(guaranteedRare, true), sold: false });
+  }
   return items;
 }
 
@@ -61,9 +99,12 @@ export function shopScene(root) {
   // M5b: forge Economy T2 discount, resolved once at scene mount.
   // (Discount applies to relic items only; potion is integer-gold-per-HP so
   // it's left untouched for now to keep stepper math clean.)
-  const shopDiscount = forgeShopDiscount(getState().meta || {});
+  const shopMeta = getState().meta || {};
+  const shopDiscount = forgeShopDiscount(shopMeta);
+  // LUCK T1 -- +10% chance each common shop slot upgrades to a rare.
+  const rareBonus = forgeLuckRareBonus(shopMeta);
   const sceneState = {
-    items: rollShopRelics(shopDiscount),
+    items: rollShopRelics(shopDiscount, rareBonus),
     selectedIdx: null,
     potionHp: 0, // current stepper value
     showRunInfo: false, // 2.7d batch4: custom modal flag
@@ -199,7 +240,7 @@ export function shopScene(root) {
           ["HP", `${hp}/${maxHp}`],
           ["Energy", cur.energy || 0],
           ["SHARPEN buffs", buffStr],
-          ["STUDY uses left", `${cur.readUses || 0}/3`],
+          ["STUDY uses left", `${cur.readUses || 0}/4`],
         ]},
       ],
       relicIds: cur.relics || [],

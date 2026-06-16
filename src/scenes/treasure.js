@@ -5,7 +5,7 @@ import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import relicsData from "../data/relics.json" assert { type: "json" };
 import { acquireRelic } from "../data/relicEffects.js";
 import { renderRunInfoModalHTML } from "../ui/runInfoModal.js";
-import { forgeTreasurePicks } from "../data/forgeEffects.js";
+import { forgeTreasurePicks, forgeLuckExtraChoice } from "../data/forgeEffects.js";
 
 /**
  * Treasure scene (2.7b-4):
@@ -35,18 +35,22 @@ function weightedPickWithoutReplacement(pool, n) {
   return picks;
 }
 
-function rollTreasureRelics() {
+function rollTreasureRelics(numOptions = 3) {
   const commons = relicsData.commons || [];
-  const picks = weightedPickWithoutReplacement(commons, 3);
+  const picks = weightedPickWithoutReplacement(commons, numOptions);
   picks.sort((a, b) => (SUBTIER_RANK[b.subtier] || 0) - (SUBTIER_RANK[a.subtier] || 0));
   return picks;
 }
 
 export function treasureScene(root) {
-  // M5b: forge Economy T3 -- max picks goes from 1 -> 2 when forged.
-  const maxPicks = forgeTreasurePicks(getState().meta || {});
+  // forgeTreasurePicks is a legacy inert shim (always 1); keep it so the
+  // free-pick count stays at 1 unless a future node wires it.
+  const treasureMeta = getState().meta || {};
+  const maxPicks = forgeTreasurePicks(treasureMeta);
+  // LUCK T2 -- +1 OPTION shown (3 -> 4 cards). Free picks still stay at maxPicks.
+  const numOptions = 3 + forgeLuckExtraChoice(treasureMeta);
   const sceneState = {
-    relics: rollTreasureRelics(),
+    relics: rollTreasureRelics(numOptions),
     selectedIdx: null,
     claimedIdxs: [],           // array of claimed indices (0..maxPicks length)
     showRunInfo: false,
@@ -129,7 +133,7 @@ export function treasureScene(root) {
           ["HP", `${hp}/${maxHp}`],
           ["Energy", cur.energy || 0],
           ["SHARPEN buffs", buffStr],
-          ["STUDY uses left", `${cur.readUses || 0}/3`],
+          ["STUDY uses left", `${cur.readUses || 0}/4`],
         ]},
       ],
       relicIds: cur.relics || [],

@@ -1,52 +1,584 @@
 {
-  "ch1": {
-    "name": "Goblin Cave",
-    "background": "bg_ch1_goblin_caverns.png",
-    "normals": [
-      { "id": "goblin_warrior", "name": "Goblin Warrior", "tier": "normal", "hp": 35, "dmg": 8,  "honest_pct": 70, "pattern": ["SLASH","GUARD","COUNTER"],          "special": "rally",        "role": "Buff self +2 dmg 2t" },
-      { "id": "goblin_archer",  "name": "Goblin Archer",  "tier": "normal", "hp": 28, "dmg": 10, "honest_pct": 65, "pattern": ["GUARD","SLASH","COUNTER"],          "special": "poison_arrow", "role": "DoT 3 dmg/t 3t" },
-      { "id": "wild_wolf",      "name": "Wild Wolf",      "tier": "normal", "hp": 30, "dmg": 9,  "honest_pct": 75, "pattern": ["COUNTER","COUNTER","SLASH"],        "special": "pack_howl",    "role": "+15% honest 3t" },
-      { "id": "goblin_shaman",  "name": "Goblin Shaman",  "tier": "normal", "hp": 25, "dmg": 7,  "honest_pct": 60, "pattern": ["GUARD","SLASH","COUNTER","COUNTER"],"special": "hex",          "role": "-10 energy" },
-      { "id": "cave_troll",     "name": "Cave Troll",     "tier": "normal", "hp": 50, "dmg": 12, "honest_pct": 80, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],  "special": "stone_skin",   "role": "-3 dmg taken 2t" }
+ "ch1": {
+  "name": "Goblin Cave",
+  "background": "bg_ch1_goblin_caverns.png",
+  "normals": [
+   {
+    "id": "goblin_warrior",
+    "name": "Goblin Warrior",
+    "tier": "normal",
+    "hp": 35,
+    "dmg": 8,
+    "honest_pct": 70,
+    "pattern": [
+     "SLASH",
+     "GUARD",
+     "COUNTER"
     ],
-    "elites": [
-      { "id": "frost_giant",    "name": "Cave Golem",     "sprite_id": "rock_golem", "tier": "elite", "hp": 65, "dmg": 14, "honest_pct": 55, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],          "special": "avalanche",  "role": "Boulder slam — 7 dmg ignore guard" },
-      { "id": "bandit_captain", "name": "Bandit Captain", "tier": "elite", "hp": 55, "dmg": 11, "honest_pct": 50, "pattern": ["GUARD","COUNTER","SLASH","COUNTER"],        "special": "steal_gold", "role": "Steal 10g on hit" }
+    "special": "rally",
+    "role": "Buff self +2 dmg 2t",
+    "tendency": {
+     "SLASH": 50,
+     "GUARD": 20,
+     "COUNTER": 30
+    }
+   },
+   {
+    "id": "goblin_archer",
+    "name": "Goblin Archer",
+    "tier": "normal",
+    "hp": 28,
+    "dmg": 10,
+    "honest_pct": 65,
+    "pattern": [
+     "GUARD",
+     "SLASH",
+     "COUNTER"
     ],
-    "boss": { "id": "goblin_king", "name": "Goblin King", "tier": "boss", "hp": 80, "dmg": 12, "honest_pct": 45, "scheme_every": 3, "pattern": ["SLASH","COUNTER","COUNTER","GUARD","SLASH","COUNTER"], "special": "war_cry", "role": "CH1 boss — war_cry +4 dmg 2t" }
-  },
-  "ch2": {
-    "name": "Frozen Mine",
-    "background": "bg_ch2_frost_spire.png",
-    "normals": [
-      { "id": "ice_wolf",    "name": "Ice Wolf",    "tier": "normal", "hp": 45, "dmg": 10, "honest_pct": 65, "pattern": ["COUNTER","COUNTER","SLASH"],          "special": "freeze",      "role": "Skip player turn" },
-      { "id": "dark_miner",  "name": "Dark Miner",  "tier": "normal", "hp": 50, "dmg": 9,  "honest_pct": 70, "pattern": ["GUARD","SLASH","SLASH"],              "special": "plate_armor", "role": "-4 dmg taken 2t" },
-      { "id": "mine_bat",    "name": "Mine Bat",    "tier": "normal", "hp": 30, "dmg": 11, "honest_pct": 60, "pattern": ["COUNTER","SLASH"],                    "special": "screech",     "role": "Screech debuff" },
-      { "id": "frost_golem", "sprite_id": "ice_golem", "name": "Frost Golem", "tier": "normal", "hp": 60, "dmg": 8,  "honest_pct": 75, "pattern": ["GUARD","GUARD","SLASH","COUNTER"],    "special": "ice_shield",  "role": "Ice shield buff" },
-      { "id": "snow_bandit", "sprite_id": "bandit_scout", "name": "Snow Bandit", "tier": "normal", "hp": 40, "dmg": 12, "honest_pct": 55, "pattern": ["SLASH","SLASH","COUNTER"],            "special": "ambush",      "role": "Ambush attack" }
+    "special": "poison_arrow",
+    "role": "DoT 3 dmg/t 3t",
+    "tendency": {
+     "SLASH": 45,
+     "GUARD": 20,
+     "COUNTER": 35
+    }
+   },
+   {
+    "id": "wild_wolf",
+    "name": "Wild Wolf",
+    "tier": "normal",
+    "hp": 30,
+    "dmg": 9,
+    "honest_pct": 75,
+    "pattern": [
+     "COUNTER",
+     "COUNTER",
+     "SLASH"
     ],
-    "elites": [
-      { "id": "frost_giant_ch2", "sprite_id": "frost_giant",    "name": "Frost Giant",    "tier": "elite", "hp": 75, "dmg": 15, "honest_pct": 50, "pattern": ["SLASH","SLASH","GUARD","COUNTER"],          "special": "avalanche",  "role": "7 dmg ignore guard (CH2 ver)" },
-      { "id": "bandit_captain_ch2", "sprite_id": "bandit_captain", "name": "Bandit Captain", "tier": "elite", "hp": 65, "dmg": 13, "honest_pct": 45, "pattern": ["GUARD","COUNTER","SLASH","COUNTER"],        "special": "steal_gold", "role": "Steal 10g on hit (CH2 ver)" }
+    "special": "pack_howl",
+    "role": "+15% honest 3t",
+    "tendency": {
+     "SLASH": 30,
+     "GUARD": 15,
+     "COUNTER": 55
+    }
+   },
+   {
+    "id": "goblin_shaman",
+    "name": "Goblin Shaman",
+    "tier": "normal",
+    "hp": 25,
+    "dmg": 7,
+    "honest_pct": 60,
+    "pattern": [
+     "GUARD",
+     "SLASH",
+     "COUNTER",
+     "COUNTER"
     ],
-    "miniboss": { "id": "hooded_sister", "sprite_id": "frost_witch", "name": "Hooded Sister", "tier": "miniboss", "hp": 110, "dmg": 14, "honest_pct": 60, "pattern": ["COUNTER","GUARD","SLASH","COUNTER","GUARD"], "special": "scrying", "role": "CH2 miniboss — reads player intent" },
-    "boss": { "id": "ice_queen", "name": "Ice Queen", "tier": "boss", "hp": 120, "dmg": 14, "honest_pct": 40, "scheme_every": 3, "pattern": ["SLASH","COUNTER","GUARD","COUNTER","SLASH","GUARD"], "special": "blizzard", "role": "CH2 boss — blizzard -10e +5 dmg" }
-  },
-  "ch3": {
-    "name": "Dracula's Castle",
-    "background": "bg_ch3_vampire_court.png",
-    "normals": [
-      { "id": "vampire_bat",     "name": "Vampire Bat",     "tier": "normal", "hp": 40, "dmg": 11, "honest_pct": 60, "pattern": "random",                              "special": "blood_sip",   "role": "Heal 5 HP on hit" },
-      { "id": "skeleton_knight", "sprite_id": "thrall_knight", "name": "Skeleton Knight", "tier": "normal", "hp": 55, "dmg": 13, "honest_pct": 65, "pattern": ["SLASH","GUARD","SLASH"],              "special": "bone_shield", "role": "Bone shield buff" },
-      { "id": "ghost", "sprite_id": "dark_specter",           "name": "Ghost",           "tier": "normal", "hp": 35, "dmg": 14, "honest_pct": 55, "pattern": ["COUNTER","COUNTER","SLASH"],          "special": "phase_shift", "role": "Phase shift dodge" },
-      { "id": "dark_witch", "sprite_id": "vampire_mage",      "name": "Dark Witch",      "tier": "normal", "hp": 45, "dmg": 12, "honest_pct": 50, "pattern": ["COUNTER","COUNTER","SLASH"],          "special": "curse",       "role": "Curse debuff" },
-      { "id": "gargoyle", "sprite_id": "stone_sentinel",        "name": "Gargoyle",        "tier": "normal", "hp": 65, "dmg": 10, "honest_pct": 70, "pattern": ["GUARD","GUARD","SLASH","COUNTER"],    "special": "stone_form",  "role": "Stone form -dmg taken" }
+    "special": "hex",
+    "role": "-10 energy",
+    "tendency": {
+     "SLASH": 25,
+     "GUARD": 40,
+     "COUNTER": 35
+    }
+   },
+   {
+    "id": "cave_troll",
+    "name": "Cave Troll",
+    "tier": "normal",
+    "hp": 50,
+    "dmg": 12,
+    "honest_pct": 80,
+    "pattern": [
+     "SLASH",
+     "SLASH",
+     "GUARD",
+     "COUNTER"
     ],
-    "elites": [
-      { "id": "shadow_king",  "name": "Shadow King",  "tier": "elite", "hp": 85, "dmg": 16, "honest_pct": 45, "pattern": ["SLASH","SLASH","COUNTER","GUARD","COUNTER"], "special": "shadow_clone", "role": "50% dodge 2t" },
-      { "id": "vampire_lord", "name": "Vampire Lord", "tier": "elite", "hp": 75, "dmg": 14, "honest_pct": 40, "pattern": ["COUNTER","SLASH","COUNTER","GUARD"],         "special": "blood_drain", "role": "Heal 8 HP on hit" }
+    "special": "stone_skin",
+    "role": "-3 dmg taken 2t",
+    "tendency": {
+     "SLASH": 50,
+     "GUARD": 30,
+     "COUNTER": 20
+    }
+   }
+  ],
+  "elites": [
+   {
+    "id": "frost_giant",
+    "name": "Cave Golem",
+    "sprite_id": "rock_golem",
+    "tier": "elite",
+    "hp": 65,
+    "dmg": 14,
+    "honest_pct": 55,
+    "pattern": [
+     "SLASH",
+     "SLASH",
+     "GUARD",
+     "COUNTER"
     ],
-    "miniboss": { "id": "renfield", "sprite_id": "ruin_wraith", "name": "Renfield", "tier": "miniboss", "hp": 130, "dmg": 11, "honest_pct": 60, "pattern": ["SLASH","GUARD","COUNTER","SLASH","GUARD"], "special": "summon_bats", "role": "CH3 miniboss — summon bats 3 dmg/t 3t" },
-    "boss": { "id": "count_dracula", "name": "Count Dracula", "tier": "boss", "hp": 150, "dmg": 15, "honest_pct": 35, "scheme_every": 3, "pattern": ["SLASH","COUNTER","COUNTER","GUARD","SLASH","COUNTER","SLASH"], "special": "blood_curse", "role": "CH3 boss — blood curse +1 taken/stack" }
+    "special": "avalanche",
+    "role": "Boulder slam \u2014 7 dmg ignore guard",
+    "tendency": {
+     "SLASH": 45,
+     "GUARD": 30,
+     "COUNTER": 25
+    }
+   },
+   {
+    "id": "bandit_captain",
+    "name": "Bandit Captain",
+    "tier": "elite",
+    "hp": 55,
+    "dmg": 11,
+    "honest_pct": 50,
+    "pattern": [
+     "GUARD",
+     "COUNTER",
+     "SLASH",
+     "COUNTER"
+    ],
+    "special": "steal_gold",
+    "role": "Steal 10g on hit",
+    "tendency": {
+     "SLASH": 30,
+     "GUARD": 25,
+     "COUNTER": 45
+    }
+   }
+  ],
+  "boss": {
+   "id": "goblin_king",
+   "name": "Goblin King",
+   "tier": "boss",
+   "hp": 80,
+   "dmg": 12,
+   "honest_pct": 45,
+   "scheme_every": 3,
+   "pattern": [
+    "SLASH",
+    "COUNTER",
+    "COUNTER",
+    "GUARD",
+    "SLASH",
+    "COUNTER"
+   ],
+   "special": "war_cry",
+   "role": "CH1 boss \u2014 war_cry +4 dmg 2t",
+   "tendency": {
+    "SLASH": 40,
+    "GUARD": 20,
+    "COUNTER": 40
+   }
   }
+ },
+ "ch2": {
+  "name": "Frozen Mine",
+  "background": "bg_ch2_frost_spire.png",
+  "normals": [
+   {
+    "id": "ice_wolf",
+    "name": "Ice Wolf",
+    "tier": "normal",
+    "hp": 45,
+    "dmg": 10,
+    "honest_pct": 65,
+    "pattern": [
+     "COUNTER",
+     "COUNTER",
+     "SLASH"
+    ],
+    "special": "freeze",
+    "role": "Skip player turn",
+    "tendency": {
+     "SLASH": 30,
+     "GUARD": 15,
+     "COUNTER": 55
+    }
+   },
+   {
+    "id": "dark_miner",
+    "name": "Dark Miner",
+    "tier": "normal",
+    "hp": 50,
+    "dmg": 9,
+    "honest_pct": 70,
+    "pattern": [
+     "GUARD",
+     "SLASH",
+     "SLASH"
+    ],
+    "special": "plate_armor",
+    "role": "-4 dmg taken 2t",
+    "tendency": {
+     "SLASH": 45,
+     "GUARD": 35,
+     "COUNTER": 20
+    }
+   },
+   {
+    "id": "mine_bat",
+    "name": "Mine Bat",
+    "tier": "normal",
+    "hp": 30,
+    "dmg": 11,
+    "honest_pct": 60,
+    "pattern": [
+     "COUNTER",
+     "SLASH"
+    ],
+    "special": "screech",
+    "role": "Screech debuff",
+    "tendency": {
+     "SLASH": 35,
+     "GUARD": 25,
+     "COUNTER": 40
+    }
+   },
+   {
+    "id": "frost_golem",
+    "sprite_id": "ice_golem",
+    "name": "Frost Golem",
+    "tier": "normal",
+    "hp": 60,
+    "dmg": 8,
+    "honest_pct": 75,
+    "pattern": [
+     "GUARD",
+     "GUARD",
+     "SLASH",
+     "COUNTER"
+    ],
+    "special": "ice_shield",
+    "role": "Ice shield buff",
+    "tendency": {
+     "SLASH": 25,
+     "GUARD": 50,
+     "COUNTER": 25
+    }
+   },
+   {
+    "id": "snow_bandit",
+    "sprite_id": "bandit_scout",
+    "name": "Snow Bandit",
+    "tier": "normal",
+    "hp": 40,
+    "dmg": 12,
+    "honest_pct": 55,
+    "pattern": [
+     "SLASH",
+     "SLASH",
+     "COUNTER"
+    ],
+    "special": "ambush",
+    "role": "Ambush attack",
+    "tendency": {
+     "SLASH": 55,
+     "GUARD": 15,
+     "COUNTER": 30
+    }
+   }
+  ],
+  "elites": [
+   {
+    "id": "frost_giant_ch2",
+    "sprite_id": "frost_giant",
+    "name": "Frost Giant",
+    "tier": "elite",
+    "hp": 75,
+    "dmg": 15,
+    "honest_pct": 50,
+    "pattern": [
+     "SLASH",
+     "SLASH",
+     "GUARD",
+     "COUNTER"
+    ],
+    "special": "avalanche",
+    "role": "7 dmg ignore guard (CH2 ver)",
+    "tendency": {
+     "SLASH": 45,
+     "GUARD": 30,
+     "COUNTER": 25
+    }
+   },
+   {
+    "id": "bandit_captain_ch2",
+    "sprite_id": "bandit_captain",
+    "name": "Bandit Captain",
+    "tier": "elite",
+    "hp": 65,
+    "dmg": 13,
+    "honest_pct": 45,
+    "pattern": [
+     "GUARD",
+     "COUNTER",
+     "SLASH",
+     "COUNTER"
+    ],
+    "special": "steal_gold",
+    "role": "Steal 10g on hit (CH2 ver)",
+    "tendency": {
+     "SLASH": 30,
+     "GUARD": 25,
+     "COUNTER": 45
+    }
+   }
+  ],
+  "miniboss": {
+   "id": "hooded_sister",
+   "sprite_id": "frost_witch",
+   "name": "Hooded Sister",
+   "tier": "miniboss",
+   "hp": 130,
+   "dmg": 14,
+   "honest_pct": 60,
+   "pattern": [
+    "COUNTER",
+    "GUARD",
+    "SLASH",
+    "COUNTER",
+    "GUARD"
+   ],
+   "special": "clouded_sight",
+   "role": "CH2 miniboss \u2014 veiled intent (2-of-3, logged)",
+   "tendency": {
+    "SLASH": 25,
+    "GUARD": 40,
+    "COUNTER": 35
+   }
+  },
+  "boss": {
+   "id": "ice_queen",
+   "name": "Ice Queen",
+   "tier": "boss",
+   "hp": 120,
+   "dmg": 14,
+   "honest_pct": 45,
+   "scheme_every": 3,
+   "pattern": [
+    "SLASH",
+    "COUNTER",
+    "GUARD",
+    "COUNTER",
+    "SLASH",
+    "GUARD"
+   ],
+   "special": "blizzard",
+   "role": "CH2 boss \u2014 blizzard -10e +5 dmg",
+   "tendency": {
+    "SLASH": 30,
+    "GUARD": 30,
+    "COUNTER": 40
+   }
+  }
+ },
+ "ch3": {
+  "name": "Dracula's Castle",
+  "background": "bg_ch3_vampire_court.png",
+  "normals": [
+   {
+    "id": "vampire_bat",
+    "name": "Vampire Bat",
+    "tier": "normal",
+    "hp": 40,
+    "dmg": 11,
+    "honest_pct": 60,
+    "pattern": "random",
+    "special": "blood_sip",
+    "role": "Heal 5 HP on hit",
+    "tendency": {
+     "SLASH": 30,
+     "GUARD": 20,
+     "COUNTER": 50
+    }
+   },
+   {
+    "id": "skeleton_knight",
+    "sprite_id": "thrall_knight",
+    "name": "Skeleton Knight",
+    "tier": "normal",
+    "hp": 55,
+    "dmg": 13,
+    "honest_pct": 65,
+    "pattern": [
+     "SLASH",
+     "GUARD",
+     "SLASH"
+    ],
+    "special": "bone_shield",
+    "role": "Bone shield buff",
+    "tendency": {
+     "SLASH": 45,
+     "GUARD": 35,
+     "COUNTER": 20
+    }
+   },
+   {
+    "id": "ghost",
+    "sprite_id": "dark_specter",
+    "name": "Ghost",
+    "tier": "normal",
+    "hp": 35,
+    "dmg": 14,
+    "honest_pct": 55,
+    "pattern": [
+     "COUNTER",
+     "COUNTER",
+     "SLASH"
+    ],
+    "special": "phase_shift",
+    "role": "Phase shift dodge",
+    "tendency": {
+     "SLASH": 30,
+     "GUARD": 15,
+     "COUNTER": 55
+    }
+   },
+   {
+    "id": "dark_witch",
+    "sprite_id": "vampire_mage",
+    "name": "Dark Witch",
+    "tier": "normal",
+    "hp": 45,
+    "dmg": 12,
+    "honest_pct": 50,
+    "pattern": [
+     "COUNTER",
+     "COUNTER",
+     "SLASH"
+    ],
+    "special": "curse",
+    "role": "Curse debuff",
+    "tendency": {
+     "SLASH": 30,
+     "GUARD": 20,
+     "COUNTER": 50
+    }
+   },
+   {
+    "id": "gargoyle",
+    "sprite_id": "stone_sentinel",
+    "name": "Gargoyle",
+    "tier": "normal",
+    "hp": 65,
+    "dmg": 10,
+    "honest_pct": 70,
+    "pattern": [
+     "GUARD",
+     "GUARD",
+     "SLASH",
+     "COUNTER"
+    ],
+    "special": "stone_form",
+    "role": "Stone form -dmg taken",
+    "tendency": {
+     "SLASH": 25,
+     "GUARD": 50,
+     "COUNTER": 25
+    }
+   }
+  ],
+  "elites": [
+   {
+    "id": "shadow_king",
+    "name": "Shadow King",
+    "tier": "elite",
+    "hp": 85,
+    "dmg": 16,
+    "honest_pct": 45,
+    "pattern": [
+     "SLASH",
+     "SLASH",
+     "COUNTER",
+     "GUARD",
+     "COUNTER"
+    ],
+    "special": "shadow_clone",
+    "role": "50% dodge 2t",
+    "tendency": {
+     "SLASH": 40,
+     "GUARD": 20,
+     "COUNTER": 40
+    }
+   },
+   {
+    "id": "vampire_lord",
+    "name": "Vampire Lord",
+    "tier": "elite",
+    "hp": 75,
+    "dmg": 14,
+    "honest_pct": 45,
+    "pattern": [
+     "COUNTER",
+     "SLASH",
+     "COUNTER",
+     "GUARD"
+    ],
+    "special": "blood_drain",
+    "role": "Heal 8 HP on hit",
+    "tendency": {
+     "SLASH": 30,
+     "GUARD": 25,
+     "COUNTER": 45
+    }
+   }
+  ],
+  "miniboss": {
+   "id": "renfield",
+   "sprite_id": "ruin_wraith",
+   "name": "Renfield",
+   "tier": "miniboss",
+   "hp": 130,
+   "dmg": 11,
+   "honest_pct": 60,
+   "pattern": [
+    "SLASH",
+    "GUARD",
+    "COUNTER",
+    "SLASH",
+    "GUARD"
+   ],
+   "special": "summon_bats",
+   "role": "CH3 miniboss \u2014 summon bats 3 dmg/t 3t",
+   "tendency": {
+    "SLASH": 40,
+    "GUARD": 35,
+    "COUNTER": 25
+   }
+  },
+  "boss": {
+   "id": "count_dracula",
+   "name": "Count Dracula",
+   "tier": "boss",
+   "hp": 200,
+   "dmg": 15,
+   "honest_pct": 45,
+   "scheme_every": 3,
+   "pattern": [
+    "SLASH",
+    "COUNTER",
+    "COUNTER",
+    "GUARD",
+    "SLASH",
+    "COUNTER",
+    "SLASH"
+   ],
+   "special": "blood_curse",
+   "role": "CH3 boss \u2014 blood curse +1 taken/stack",
+   "tendency": {
+    "SLASH": 40,
+    "GUARD": 15,
+    "COUNTER": 45
+   },
+   "frenzy": {
+    "hpPctAtOrBelow": 20,
+    "honest": 25
+   }
+  }
+ }
 }

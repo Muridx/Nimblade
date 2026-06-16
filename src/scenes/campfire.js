@@ -232,7 +232,7 @@ export function campfireScene(root) {
           ["HP", `${hp}/${maxHp}`],
           ["Energy", cur.energy || 0],
           ["SHARPEN buffs", buffStr],
-          ["STUDY uses left", `${cur.readUses || 0}/3`],
+          ["STUDY uses left", `${cur.readUses || 0}/4`],
         ]},
       ],
       relicIds: cur.relics || [],

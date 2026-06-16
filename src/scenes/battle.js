@@ -78,6 +78,7 @@ import {
   // R9 relics
   counterDmgBonus,
   guardWinDmgBonus,
+  tacticiansBannerEnergy,
   coinPouchGold,
   momentumCoilBonus,
   rollFrostLatticeFreeze,
@@ -300,6 +301,7 @@ export function battleScene(root, opts) {
         state.enemyHealDisabledTurns = 3;
         flashRelic("holy_water", "BLOCKED");
         state.log.push(`Holy Water: monster healing disabled for 3 turns!`);
+        return; // heal is blocked this turn too; avoid double-logging "enemy heal blocked."
       }
       if (state.enemyHealDisabledTurns > 0) {
         flashRelic("holy_water", "");
@@ -344,14 +346,18 @@ export function battleScene(root, opts) {
       momentumStacks: (typeof run.momentumStacks === "number") ? run.momentumStacks : 0,
       berserkTurns: (typeof run.berserkTurns === "number") ? run.berserkTurns : 0,
     },
-    // STUDY (READ) uses remaining this RUN, default 3. Carries between battles.
-    readUsesRemaining: (typeof run.readUses === "number") ? run.readUses : 3,
+    // STUDY (READ) uses remaining this RUN, default 4. Carries between battles.
+    readUsesRemaining: (typeof run.readUses === "number") ? run.readUses : 4,
     enemy: { hp: enemyDef.hp, maxHp: enemyDef.hp, buffs: [] },
     log: [`-- Battle start --`, `${enemyDef.name} appears (HP ${enemyDef.hp})`],
     pendingAction: null,
     ended: null,
     intent: null,        // DISPLAYED intent (may lie per honest_pct)
     actualIntent: null,  // TRUE move (used in resolve)
+    actualHistory: [],   // 2.8: chronological past ACTUAL rolls (for anti-3x-streak)
+    frenzyAnnounced: false, // 2.8: Dracula blood-frenzy telegraph fired once
+    cloudedThisTurn: false, // 2.8b: intent veiled this turn (Hooded Sister)
+    cloudedPair: null,      // 2.8b: the 2 candidate moves shown in the veil log
     foresightQueue: [],  // queued ACTUAL intents for next turns
     foresightActiveThisTurn: false, // true if current intent sourced from foresight queue
     pendingRelicId: null,           // tap-select highlight on reward overlay
@@ -563,34 +569,98 @@ export function battleScene(root, opts) {
 
   const honestPct = (typeof enemyDef.honest_pct === "number") ? enemyDef.honest_pct : 100;
 
-  const rollActualIntent = () => {
-    if (Array.isArray(enemyDef.pattern)) {
-      return enemyDef.pattern[(state.turn - 1) % enemyDef.pattern.length];
+  // 2.8 GOCEK REWORK: enemy actual move is sampled each turn from per-enemy
+  // `tendency` weights (S/G/C), NOT a fixed memorizable pattern. honest_pct still
+  // governs ONLY the displayed icon (bluff). Falls back to legacy pattern/random
+  // if a monster has no tendency block.
+  const TEND = (enemyDef.tendency && typeof enemyDef.tendency === "object") ? enemyDef.tendency : null;
+  // FRENZY: optional last-stand honest drop when enemy HP <= a % of max (e.g. Dracula).
+  const FRENZY = (enemyDef.frenzy && typeof enemyDef.frenzy === "object") ? enemyDef.frenzy : null;
+  const frenzyActive = () =>
+    !!FRENZY && state.enemy.hp > 0 &&
+    state.enemy.hp <= Math.ceil(state.enemy.maxHp * (FRENZY.hpPctAtOrBelow / 100));
+  // Effective base honesty for the CURRENT roll (frenzy overrides chapter honest_pct).
+  const effHonestPct = () => (frenzyActive() ? FRENZY.honest : honestPct);
+
+  // Weighted roll from tendency with anti-3x-streak: if the same move just came up
+  // twice in a row, it is barred from the 3rd consecutive roll (feels deliberate,
+  // not luck-spammy). `hist` = chronological list of past ACTUAL rolls.
+  const weightedRoll = (hist, allowed) => {
+    const moves = Array.isArray(allowed) && allowed.length ? allowed : RPS;
+    if (!TEND) {
+      if (Array.isArray(allowed) && allowed.length) return moves[Math.floor(rngNext() * moves.length)];
+      if (Array.isArray(enemyDef.pattern)) return enemyDef.pattern[(state.turn - 1) % enemyDef.pattern.length];
+      return RPS[Math.floor(rngNext() * 3)];
     }
-    return RPS[Math.floor(rngNext() * 3)];
+    const banned = (hist.length >= 2 && hist[hist.length - 1] === hist[hist.length - 2]) ? hist[hist.length - 1] : null;
+    let total = 0;
+    const pool = moves.map((m) => {
+      const w = (m === banned && moves.length > 1) ? 0 : Math.max(0, Number(TEND[m]) || 0);
+      total += w;
+      return [m, w];
+    });
+    if (total <= 0) return moves[Math.floor(rngNext() * moves.length)];
+    let r = rngNext() * total;
+    for (const [m, w] of pool) { r -= w; if (r <= 0) return m; }
+    return pool[pool.length - 1][0];
+  };
+
+  // 2.8b CLOUDED SIGHT (Hooded Sister): each turn her TRUE move is narrowed to a
+  // random 2 of 3 RPS; the intent display is veiled ("?") and the log names both
+  // candidates. RPS stays winnable (a known 2-set always has a non-losing pick).
+  const CLOUDED = enemyDef.special === "clouded_sight";
+  const rollCloudedPair = () => {
+    const drop = RPS[Math.floor(rngNext() * 3)]; // the move unavailable this turn
+    return RPS.filter((m) => m !== drop);
+  };
+  const rollCloudedIntent = () => {
+    const pair = rollCloudedPair();
+    const m = weightedRoll(state.actualHistory, pair);
+    state.actualHistory.push(m);
+    state.cloudedPair = pair;
+    return m;
+  };
+  const cloudedVeilLog = () =>
+    `Clouded Sight \u2014 her move is veiled: ${state.cloudedPair[0]} or ${state.cloudedPair[1]}.`;
+
+  const rollActualIntent = () => {
+    const m = weightedRoll(state.actualHistory);
+    state.actualHistory.push(m);
+    return m;
   };
 
   const rollDisplayedFor = (actual, honestOverride) => {
     // honest_pct% chance display = actual. Else display = one of the OTHER 2 (gocek).
     // 2.7d batch2: honestOverride lets ENRAGED turn use 60% honest (Goblin King payoff feint).
-    const honest = (typeof honestOverride === "number") ? honestOverride : honestPct;
+    const honest = (typeof honestOverride === "number") ? honestOverride : effHonestPct();
     if (rngNext() * 100 < honest) return actual;
     const others = RPS.filter((x) => x !== actual);
     return others[Math.floor(rngNext() * others.length)];
   };
 
   // Initial roll
-  state.actualIntent = rollActualIntent();
-  state.intent = rollDisplayedFor(state.actualIntent);
-  // 2.7c-1: Insight Charm forces honest display on turn 1
-  if (insightCharmActive(run, state.turn)) state.intent = state.actualIntent;
+  if (CLOUDED) {
+    state.actualIntent = rollCloudedIntent();
+    state.cloudedThisTurn = true;
+    state.intent = "VEIL";
+    state.log.push(cloudedVeilLog());
+    // Insight Charm (reveal relic) pierces the veil on turn 1.
+    if (insightCharmActive(run, state.turn)) { state.intent = state.actualIntent; state.cloudedThisTurn = false; }
+  } else {
+    state.actualIntent = rollActualIntent();
+    state.intent = rollDisplayedFor(state.actualIntent);
+    // 2.7c-1: Insight Charm forces honest display on turn 1
+    if (insightCharmActive(run, state.turn)) state.intent = state.actualIntent;
+  }
 
-  const peekActualIntent = (offset) => {
-    // For pattern monsters: deterministic. For random: roll fresh (locked into queue).
-    if (Array.isArray(enemyDef.pattern)) {
-      return enemyDef.pattern[(state.turn - 1 + offset) % enemyDef.pattern.length];
-    }
-    return RPS[Math.floor(rngNext() * 3)];
+  // READ/foresight: pre-roll the next N actual intents as ONE consistent sequence
+  // (respecting anti-3x against current history). They are locked into the queue and
+  // consumed on following turns, so peek == actual is guaranteed.
+  const peekActualIntents = (n) => {
+    const sim = state.actualHistory.slice();
+    const out = [];
+    for (let i = 0; i < n; i++) { const m = weightedRoll(sim); sim.push(m); out.push(m); }
+    return out;
   };
 
   // Bible v3.0: enemy base dmg integrates specials system (buff/enraged/war_cry).
@@ -726,16 +796,9 @@ export function battleScene(root, opts) {
     if (state.warCryThisTurn && (action === "SLASH" || action === "GUARD" || action === "COUNTER")) {
       intent = BEATS[action];
     }
-    // Specials: scrying passive -- monster reads player intent and counter-plays.
-    // Only affects basic RPS actions; WILD/ULT/READ bypass it.
-    if (!state.warCryThisTurn && hasPassive(ss, "scrying") && (action === "SLASH" || action === "GUARD" || action === "COUNTER")) {
-      // Scrying: enemy's actual move becomes the one that BEATS player's choice.
-      // SLASH is beaten by GUARD, GUARD by COUNTER, COUNTER by SLASH.
-      const counterPlay = { SLASH: "GUARD", GUARD: "COUNTER", COUNTER: "SLASH" };
-      intent = counterPlay[action];
-      state.log.push("Scrying — the enemy reads your intent!");
-    }
-    const wasFeint = !state.warCryThisTurn && state.intent !== state.actualIntent;
+    // 2.8b: scrying (reactive counter-play) REMOVED — replaced by clouded_sight, a
+    // fair veiled-intent passive handled at intent-roll time (no auto-lose).
+    const wasFeint = !state.warCryThisTurn && !state.cloudedThisTurn && state.intent !== state.actualIntent;
     // Show the actual special name on scheme turns (was hardcoded "WAR CRY").
     const intentLabel = state.warCryThisTurn ? (specialName(ss) || "SPECIAL").toUpperCase() : intent;
     // Show the weapon-skill / ultimate name in the log (not the raw "WILD"/"ULT" code).
@@ -754,27 +817,23 @@ export function battleScene(root, opts) {
     state.enemyActed = false;  // pose swap only if enemy "acted" (RPS loss, WILD, ULT-with-hit)
 
     if (action === "READ") {
-      // STUDY (READ) - 2.7a-patch v1.2 lock:
-      //   * 3 uses per RUN (carries between battles, NOT per-battle)
-      //   * cost: 60 energy + skip turn (Bible v3.0 §3.2; Void Crown -20e -> 40e)
-      //   * free hit dmg: reduced by 20% (you flinch-defend while reading)
+      // STUDY (READ) - 2.9 tune:
+      //   * 4 uses per RUN (carries between battles, NOT per-battle)
+      //   * cost: 50 energy + skip turn (Void Crown -20e -> 30e)
+      //   * free hit dmg: reduced by 50% (you flinch-defend while reading)
       //   * reveals next 1 intent AND locks it HONEST (anti-feint)
       // 2.7c-3: Void Crown -- READ cost -20e and queues 2 honest reveals.
-      const readCost = 60 + voidCrownReadCostDelta(run);
+      const readCost = 50 + voidCrownReadCostDelta(run);
       state.player.energy -= readCost;
       state.readUsesRemaining = Math.max(0, state.readUsesRemaining - 1);
-      const reducedHit = Math.floor(enemyDef.dmg * 0.8);
+      const reducedHit = Math.floor(enemyDef.dmg * 0.5);
       let taken = applyBerserkTaken(reducedHit); taken = epicTakenMod(taken);
       applyTakenToPlayer(taken);
       const extra = voidCrownExtraHonestReveals(run);
-      if (extra > 0) {
-        state.foresightQueue = [peekActualIntent(1), peekActualIntent(2)];
-      } else {
-        state.foresightQueue = [peekActualIntent(1)];
-      }
+      state.foresightQueue = peekActualIntents(extra > 0 ? 2 : 1);
       // Void Crown bonus: next attack WIN gets +10% dmg.
       if (hasVoidCrown(run)) state.voidCrownPendingBonus = true;
-      line += `STUDY - took ${taken} (-20%), next ${1 + extra} intent(s) locked honest (${state.readUsesRemaining} left)`;
+      line += `STUDY - took ${taken} (-50%), next ${1 + extra} intent(s) locked honest (${state.readUsesRemaining} left)`;
       // Player still chained an action interruption - reset combo
       state.player.comboCount = 0;
       state.playerActed = false;  // no player pose (skip turn)
@@ -865,8 +924,8 @@ export function battleScene(root, opts) {
         const dealt = enemyTakeDmg(epicDealtMod(applyBerserkDealt(arcaneAbil(Math.floor(S.slash_dmg * 2.5))) + flatAtkBonus()), { ignoreArmor: true });
         line += `${ultName}: ${dealt} dmg (ignore GUARD)`;
       } else if (weapon.id === "axe") {
-        // EXECUTIONER: instakill if enemy <30% HP (not boss/miniboss); else 2x slash dmg.
-        const lowHp = state.enemy.hp < state.enemy.maxHp * 0.3;
+        // EXECUTIONER: instakill if enemy <20% HP (not boss/miniboss); else 2x slash dmg.
+        const lowHp = state.enemy.hp < state.enemy.maxHp * 0.2;
         const protectedFoe = isBossFloor || isMinibossFloor;
         if (lowHp && !protectedFoe) {
           state.enemy.hp = 0;
@@ -942,6 +1001,13 @@ export function battleScene(root, opts) {
         if (action === "GUARD") {
           const psB = guardWinDmgBonus(run);
           if (psB > 0) { dmg += psB; line += ` [Parry +${psB}]`; }
+          // Tactician's Banner: GUARD win -> gain energy (clamped centrally later).
+          const tbE = tacticiansBannerEnergy(run);
+          if (tbE > 0) {
+            state.player.energy += tbE;
+            flashRelic("tacticians_banner", `+${tbE}\u26a1`);
+            line += ` [Banner +${tbE}\u26a1]`;
+          }
         }
         // R9: Momentum Coil -- +1 dmg per consecutive RPS win (cap +5), any action.
         const __mc = momentumCoilBonus(run, state.player.comboCount);
@@ -1280,12 +1346,34 @@ export function battleScene(root, opts) {
         state.log.push(`* IRON WILL -- saw through the scheme (honest this turn)! *`);
       }
 
+      // 2.8: Dracula-style BLOOD FRENZY -- once HP drops to the threshold, honest
+      // plunges (tells vanish). Telegraph once so the last-stand twist is fair.
+      if (FRENZY && !state.frenzyAnnounced && frenzyActive()) {
+        state.frenzyAnnounced = true;
+        state.log.push(`* ${enemyDef.name} enters BLOOD FRENZY -- his tells vanish! *`);
+      }
+
       // Roll next intent: actual first (prefer foresight queue = honest display), else normal gocek roll
       if (state.foresightQueue.length > 0) {
         state.actualIntent = state.foresightQueue.shift();
+        state.actualHistory.push(state.actualIntent); // keep anti-3x history in sync
         state.intent = state.actualIntent; // foresight rounds: display = actual (100% honest)
         state.foresightActiveThisTurn = true;
+        state.cloudedThisTurn = false; // READ pierces the veil
+      } else if (CLOUDED) {
+        // 2.8b CLOUDED SIGHT: veil intent, narrow true move to a random 2 of 3, log both.
+        state.actualIntent = rollCloudedIntent();
+        state.cloudedThisTurn = true;
+        state.foresightActiveThisTurn = false;
+        state.intent = "VEIL";
+        state.log.push(cloudedVeilLog());
+        // Reveal relics (Time Glass / Eye / Iron Will) pierce the veil.
+        if ((honestIntentTurn(run, state.turn) || ironWillHonestThisTurn) && !state.crownTurnThisTurn) {
+          state.intent = state.actualIntent;
+          state.cloudedThisTurn = false;
+        }
       } else {
+        state.cloudedThisTurn = false;
         state.actualIntent = rollActualIntent();
         // Enraged turn -> intent display lies more often (60% honest).
         const honestForThisRoll = startEnragedTurn ? 60 : undefined;
@@ -1295,7 +1383,7 @@ export function battleScene(root, opts) {
         state.foresightActiveThisTurn = false;
         // Apply specials honest modifier (additive to base honest_pct).
         if (!startEnragedTurn && specialHonestMod !== 0) {
-          const effectiveHonest = Math.max(0, Math.min(100, honestPct + specialHonestMod));
+          const effectiveHonest = Math.max(0, Math.min(100, effHonestPct() + specialHonestMod));
           state.intent = rollDisplayedFor(state.actualIntent, effectiveHonest);
         }
         // 2.7c-2: Time Glass / Eye of Omniscience forces honest display on turns 1-2.
@@ -1311,6 +1399,7 @@ export function battleScene(root, opts) {
         state.enemyFrozenThisTurn = true;
         state.actualIntent = "GUARD"; // enemy guards = deals 0
         state.intent = "GUARD";
+        state.cloudedThisTurn = false; // frozen reveals the guard
         state.log.push("Enemy is FROZEN -- guards this turn.");
       } else {
         state.enemyFrozenThisTurn = false;
@@ -1354,6 +1443,10 @@ export function battleScene(root, opts) {
     if (state.warCryThisTurn || intent === "WARCRY") {
       const schemeName = (specialName(ss) || "WAR CRY").toUpperCase();
       intentHtml = `INTENT: <span class="b-intent__warcry">\u26A1 ${schemeName} -- charging</span>`;
+    } else if (state.cloudedThisTurn && intent === "VEIL" && Array.isArray(state.cloudedPair)) {
+      // 2.8b CLOUDED SIGHT: hide exact move, show the 2 candidates (fair veil).
+      const [p1, p2] = state.cloudedPair;
+      intentHtml = `INTENT: <span class="b-intent__veil">\u2753 VEILED -- ${INTENT_ICON[p1]} ${p1} or ${INTENT_ICON[p2]} ${p2}?</span>`;
     } else {
       const dmgText = intent === "GUARD" ? "defends" : `${idmg} DMG`;
       const enragedTag = state.enragedThisTurn ? ` <span class="b-intent__enraged">\u26A1 ENRAGED +50%</span>` : "";
@@ -1400,9 +1493,13 @@ export function battleScene(root, opts) {
     const action = (act, label, dmg, beats) => {
       const pending = state.pendingAction === act ? "b-act--pending" : "";
       const disabled = state.ended ? "disabled" : "";
-      return `<button class="b-act ${pending}" data-action="action" data-act="${act}" ${disabled}>
-        <div class="b-act__main">${label} <strong>${dmg}</strong></div>
-        <div class="b-act__sub">Beats ${beats}</div>
+      const typeClass = `b-act--${act.toLowerCase()}`;
+      const icon = INTENT_ICON[act] || "";
+      return `<button class="b-act ${typeClass} ${pending}" data-action="action" data-act="${act}" ${disabled}>
+        <span class="b-act__ic">${icon}</span>
+        <span class="b-act__name">${label}</span>
+        <span class="b-act__num">${dmg}</span>
+        <span class="b-act__beats">beats ${beats}</span>
       </button>`;
     };
     const logHtml = state.log.slice(-3).map((l) => `<div>${l}</div>`).join("");
@@ -1664,7 +1761,7 @@ export function battleScene(root, opts) {
               <div class="b-modal__row"><span>Energy</span><strong>${state.player.energy}/${state.player.maxEnergy}</strong></div>
               <div class="b-modal__row"><span>Momentum</span><strong>${state.player.momentumStacks}</strong></div>
               <div class="b-modal__row"><span>Berserk turns left</span><strong>${state.player.berserkTurns}</strong></div>
-              <div class="b-modal__row"><span>STUDY uses left</span><strong>${state.readUsesRemaining}/3</strong></div>
+              <div class="b-modal__row"><span>STUDY uses left</span><strong>${state.readUsesRemaining}/4</strong></div>
             </div>
             <div class="b-modal__section">
               <div class="b-modal__sub">RELICS (${rls.length})</div>
@@ -1679,7 +1776,7 @@ export function battleScene(root, opts) {
     }
 
     // 2.7c-3: Void Crown -- READ cost reduced.
-    const readCostUi = 60 + voidCrownReadCostDelta(run);
+    const readCostUi = 50 + voidCrownReadCostDelta(run);
     const canRead = !state.ended && state.readUsesRemaining > 0 && state.player.energy >= readCostUi;
     const readReveals = 1 + voidCrownExtraHonestReveals(run);
     const readLabel = state.readUsesRemaining <= 0
@@ -1691,12 +1788,24 @@ export function battleScene(root, opts) {
         ${action("GUARD", "GUARD", S.guard_dmg_reduction_pct + "%", "SLASH")}
         ${action("COUNTER", "COUNTER", S.counter_win_dmg, "GUARD")}
       </div>
-      <button class="b-wild ${canWild ? "" : "b-wild--off"}" data-action="action" data-act="WILD" ${canWild ? "" : "disabled"}>
-        <strong>${weapon.weapon_skill.name.toUpperCase()}</strong> (${weapon.weapon_skill.action}) - ${weapon.weapon_skill.description} - ${wsCost}e
-      </button>
-      <button class="b-read ${canRead ? "" : "b-read--off"}" data-action="action" data-act="READ" ${canRead ? "" : "disabled"}>
-        \u{1F441} ${readLabel}
-      </button>`);
+      <div class="b-secondary">
+        <button class="b-sec b-sec--riposte ${canWild ? "" : "b-sec--off"}" data-action="action" data-act="WILD" ${canWild ? "" : "disabled"}>
+          <span class="b-sec__ic">\u{1F93A}</span>
+          <span class="b-sec__txt">
+            <span class="b-sec__name">${weapon.weapon_skill.name.toUpperCase()}</span>
+            <span class="b-sec__sub">${weapon.weapon_skill.description}</span>
+          </span>
+          <span class="b-sec__cost">${wsCost}e</span>
+        </button>
+        <button class="b-sec b-sec--study ${canRead ? "" : "b-sec--off"}" data-action="action" data-act="READ" ${canRead ? "" : "disabled"}>
+          <span class="b-sec__ic">\u{1F441}\uFE0F</span>
+          <span class="b-sec__txt">
+            <span class="b-sec__name">STUDY</span>
+            <span class="b-sec__sub">${state.readUsesRemaining <= 0 ? "Out of uses this run" : `Reveal ${readReveals} honest \u00b7 ${state.readUsesRemaining} left`}</span>
+          </span>
+          <span class="b-sec__cost">${state.readUsesRemaining <= 0 ? "\u2014" : `${readCostUi}e`}</span>
+        </button>
+      </div>`);
 
     const lowHpClass = state.player.hp > 0 && state.player.hp < state.player.maxHp * 0.25 ? "b-bar__fill--critical" : "";
     const enemyDyingClass = state.ended === "win" ? "b-sprite--dying" : "";
@@ -1776,7 +1885,7 @@ export function battleScene(root, opts) {
     root.innerHTML = `
       <div class="b-screen" style="background-image:url('/assets/${bgImg}')">
         <div class="b-header">
-          <button class="b-icon-btn" data-action="settings">SET</button>
+          ${state.ended ? `<span class="b-icon-btn b-icon-btn--ghost"></span>` : `<button class="b-icon-btn b-icon-btn--surrender" data-action="flee">SURRENDER</button>`}
           <div class="b-stage">${state.chapter} - FLOOR ${state.floor}/${state.floorMax}${isMinibossFloor ? " [MINIBOSS]" : ""}</div>
           <button class="b-icon-btn b-runinfo" data-action="runinfo">RUN INFO</button>
         </div>
@@ -1801,17 +1910,19 @@ export function battleScene(root, opts) {
             <div class="b-sprite ${enemyDyingClass}"><img class="b-sprite__img" src="/assets/${spriteId}.png" alt="" draggable="false"></div>
           </div>
         </div>
-        <div class="b-mid b-mid--2col">
-          <div class="b-card">
-            <div class="b-card__title">${weapon.name.toUpperCase()}</div>
-            <div class="b-card__small"><strong>${weapon.passive.name}</strong></div>
-            <div class="b-card__small">Stacks: ${state.player.momentumStacks}</div>
-            <div class="b-card__small">Combo: x${state.player.comboCount}</div>
+        <div class="b-strip">
+          <div class="b-synergy">
+            <span class="b-synergy__ic">\u{1F5E1}\uFE0F</span>
+            <span class="b-synergy__txt">
+              <span class="b-synergy__name">${weapon.passive.name.toUpperCase()}</span>
+              <span class="b-synergy__sub">Stacks ${state.player.momentumStacks} \u00b7 Combo x${state.player.comboCount}</span>
+            </span>
           </div>
-          <button class="b-card b-card--ult ${canUlt ? "b-card--ready" : ""}" data-action="ult" ${!canUlt ? "disabled" : ""}>
-            <div class="b-card__title">${weapon.ultimate.name.toUpperCase()}</div>
-            <div class="b-bar b-bar--ult"><div class="b-bar__fill b-bar__fill--ult" style="width:${ultPct}%"></div><span class="b-bar__text">${state.player.energy}/${ultCost}</span></div>
-            <div class="b-card__small">${canUlt ? "TAP TO USE" : weapon.ultimate.description}</div>
+          <button class="b-ult ${canUlt ? "b-ult--ready" : ""}" data-action="ult" ${!canUlt ? "disabled" : ""}>
+            <span class="b-ult__name">\u26A1 ${weapon.ultimate.name.toUpperCase()}</span>
+            <span class="b-ult__bar"><span class="b-ult__fill" style="width:${ultPct}%"></span></span>
+            <span class="b-ult__txt">${state.player.energy}/${ultCost}</span>
+            <span class="b-ult__sub">${canUlt ? "TAP TO USE" : weapon.ultimate.description}</span>
           </button>
         </div>
         <div class="b-battlelog">
@@ -1820,7 +1931,6 @@ export function battleScene(root, opts) {
         </div>
         <div class="b-prompt">CHOOSE YOUR MOVE</div>
         ${actionsBlock}
-        ${state.ended ? "" : `<button class="b-surrender" data-action="flee">SURRENDER</button>`}
         ${relicsRowHtml}
         ${endOverlay}
         ${surrenderModal}

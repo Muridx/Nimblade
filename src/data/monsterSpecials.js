@@ -190,12 +190,15 @@ const SPECIALS = {
     },
   },
 
-  /** Hooded Sister (Miniboss) — reads player intent (100% counter-play) */
-  scrying: {
-    name: "Scrying",
+  /** Hooded Sister (Miniboss) — CLOUDED SIGHT: intent veiled, narrowed to 2 of 3 RPS each turn */
+  clouded_sight: {
+    name: "Clouded Sight",
     type: "passive",
-    // battle.js checks hasPassive(ss, "scrying") to flip intent visibility
-    description: "Enemy reads your intent — choose wisely.",
+    // battle.js checks hasPassive(ss, "clouded_sight"): each turn her TRUE move is
+    // restricted to a random 2 of 3 RPS, the intent icon shows a veil ("?"), and the
+    // log names the 2 candidates. RPS stays winnable (no auto-lose); reveal relics &
+    // READ pierce the veil.
+    description: "Her intent is veiled — but it's only one of two moves (shown in the log).",
   },
 
   /** Ice Queen — drain 10 energy + deal 5 direct damage */

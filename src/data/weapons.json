@@ -78,12 +78,12 @@
     "icon": "🪓",
     "sprite_prefix": "axe",
     "stats": {
-      "slash_dmg": 13,
-      "guard_dmg_reduction_pct": 65,
+      "slash_dmg": 11,
+      "guard_dmg_reduction_pct": 50,
       "guard_win_dmg": 6,
       "counter_win_dmg": 14,
       "counter_loss_dmg_taken": 3,
-      "ws_cost": 30,
+      "ws_cost": 40,
       "ult_cost": 100,
       "energy_regen_per_turn": 20
     },
@@ -95,7 +95,7 @@
     "weapon_skill": {
       "id": "cleave",
       "name": "Cleave",
-      "cost": 30,
+      "cost": 40,
       "action": "SLASH",
       "description": "Guaranteed SLASH. If you win, apply Berserk to enemy (2 turns, +50% damage taken)."
     },
@@ -103,7 +103,7 @@
       "id": "executioner",
       "name": "Executioner",
       "cost": 100,
-      "description": "If enemy below 30% HP, instant kill. Otherwise deal 2x damage."
+      "description": "If enemy below 20% HP, instant kill. Otherwise deal 2x damage."
     },
     "unlock": { "achievement_id": "axe_max_turn_dmg", "threshold": 30, "description": "Deal 30+ dmg in a single turn (any run)." }
   },
