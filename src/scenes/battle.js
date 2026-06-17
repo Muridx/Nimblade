@@ -7,6 +7,9 @@ import relicsData from "../data/relics.json";
 import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import { addRunGold, payoutShards, advanceChapter } from "../data/runHelpers.js";
 import { submitRun as leaderboardSubmitRun } from "../data/leaderboard.js";
+import { saveBestIfNew, gauntletProgress, getWeekNumber, getWeeklySeed } from "../scenes/gauntlet.js";
+import { submitGauntletScore } from "../data/gauntletLeaderboard.js";
+import { getAddress } from "../data/wallet.js";
 import {
   forgeDmgBonus,
   forgeEnergyRegenBonus,
@@ -95,6 +98,13 @@ const MAX_ENERGY = 100;
 const INTENT_ICON = { SLASH: "\u2694\uFE0F", GUARD: "\u{1F6E1}\uFE0F", COUNTER: "\u{1F504}" };
 const BEATS = { SLASH: "COUNTER", GUARD: "SLASH", COUNTER: "GUARD" };
 const RPS = ["SLASH", "GUARD", "COUNTER"];
+
+// Phase 2 Gauntlet: human-readable progress label.
+function progressLabel(progress) {
+  const ch = Math.floor(progress / 100);
+  const fl = progress % 100;
+  return `CH${ch} Floor ${fl}`;
+}
 
 // --- 2.7a Reward helpers ----------------------------------------------------
 // Gold drop ranges per enemy tier (Locks §8.1 Layer 1)
@@ -476,6 +486,10 @@ export function battleScene(root, opts) {
   // 2.7d M3: map = source of truth, scenes return to it after.
   const applyRewardAndAdvance = (chosenRelicId) => {
     if (!state.rewardData) return;
+    // Phase 3: log reward decision.
+    if (run.moveLog) {
+      run.moveLog.push({ t: "reward", floor: run.floor || 1, v: chosenRelicId || "skip" });
+    }
     let newRun = { ...run };
     addRunGold(newRun, state.rewardData.gold); // M2
     // Carry-over fields persisted to run state FIRST (so acquireRelic sees fresh HP)
@@ -517,6 +531,10 @@ export function battleScene(root, opts) {
   // Mutates run state but does NOT navigate -- caller (boss-finish click) goes to lobby.
   const applyBossReward = (took) => {
     if (!state.rewardData) return;
+    // Phase 3: log boss reward decision.
+    if (run.moveLog) {
+      run.moveLog.push({ t: "boss_reward", floor: run.floor || 1, v: took ? "take" : "skip" });
+    }
     let newRun = { ...run };
     addRunGold(newRun, state.rewardData.gold); // M2
     newRun.playerHp = state.player.hp;
@@ -563,6 +581,20 @@ export function battleScene(root, opts) {
       leaderboardSubmitRun(newRun).then((res) => {
         if (res.ok) console.log("[leaderboard] submitted run", res.row.id);
       });
+    }
+    // Phase 2+3 Gauntlet: save best score on boss clear + submit to Supabase.
+    if (newRun.mode === "gauntlet") {
+      state.gauntletNewBest = saveBestIfNew(newRun);
+      state.gauntletProgress = gauntletProgress(newRun);
+      submitGauntletScore({
+        weekNum: getWeekNumber(),
+        weekSeed: getWeeklySeed(),
+        progress: gauntletProgress(newRun),
+        hp: Math.max(0, newRun.playerHp || 0),
+        weapon: newRun.weapon || "unknown",
+        moveLog: newRun.moveLog || null,
+        walletAddr: getAddress() || null,
+      }).then(r => { if (r.ok) console.log("[gauntlet-lb] boss-clear score submitted"); });
     }
     render();
   };
@@ -1276,6 +1308,21 @@ export function battleScene(root, opts) {
       // earned as shards regardless of survival. Run-end overlay reads
       // state.runEndShards to display the result.
       state.runEndShards = payoutShards({ run, isCh1BossClear: false });
+      // Phase 2 Gauntlet: save score on death (progress = current chapter/floor).
+      // Phase 3: also submit to Supabase leaderboard.
+      if (run.mode === "gauntlet") {
+        state.gauntletNewBest = saveBestIfNew(run);
+        state.gauntletProgress = gauntletProgress(run);
+        submitGauntletScore({
+          weekNum: getWeekNumber(),
+          weekSeed: getWeeklySeed(),
+          progress: gauntletProgress(run),
+          hp: Math.max(0, run.playerHp || 0),
+          weapon: run.weapon || "unknown",
+          moveLog: run.moveLog || null,
+          walletAddr: getAddress() || null,
+        }).then(r => { if (r.ok) console.log("[gauntlet-lb] death score submitted"); });
+      }
     } else {
       state.turn++;
       // Tick player buffs (berserk countdown)
@@ -1529,13 +1576,18 @@ export function battleScene(root, opts) {
         : (lossShards.shardsEarned > 0
           ? `<div class="b-end__shards">\ud83d\udc8e +${lossShards.shardsEarned} shards earned</div>`
           : `<div class="b-end__stats b-end__stats--muted">No shards earned (need gold to convert)</div>`);
+      // Phase 2 Gauntlet: show gauntlet score on death.
+      const gauntletLossLine = (run.mode === "gauntlet" && state.gauntletProgress)
+        ? `<div class="b-end__gauntlet">⚔️ Gauntlet Score: ${progressLabel(state.gauntletProgress)} · HP ${Math.max(0, state.player?.hp || 0)}${state.gauntletNewBest ? " · 🏆 NEW BEST!" : ""}</div>`
+        : "";
       endOverlay = `
       <div class="b-end b-end--lose ${noAnim}">
         <div class="b-end__title">x GAME OVER x</div>
         <div class="b-end__sub">You fell to ${enemyDef.name} on Floor ${state.floor}/${state.floorMax}</div>
         <div class="b-end__stats">Gold earned: ${run.totalGoldEarned || 0} - Relics: ${(run.relics || []).length}</div>
         ${lossShardLine}
-        <button class="btn btn--primary b-end__btn" data-action="end-back">BACK TO LOBBY</button>
+        ${gauntletLossLine}
+        <button class="btn btn--primary b-end__btn" data-action="end-back">${run.mode === "gauntlet" ? "BACK TO GAUNTLET" : "BACK TO LOBBY"}</button>
       </div>`;
     } else if (state.ended === "win" && isMinibossFloor) {
       // Miniboss reward: guaranteed epic relic (auto-grant like boss, but returns to map).
@@ -1615,6 +1667,12 @@ export function battleScene(root, opts) {
           ctaButtons = `
             <button class="btn btn--primary b-end__btn" data-action="boss-finish">CONNECT WALLET &amp; PLAY CH2</button>
             <button class="btn btn--secondary b-end__btn" data-action="boss-finish">BACK TO LOBBY</button>`;
+        } else if ((finalRun.mode || run.mode) === "gauntlet") {
+          // Phase 2 Gauntlet: run complete celebration with gauntlet score.
+          ctaTitle = "⚔️ GAUNTLET COMPLETE ⚔️";
+          ctaSub = `${bossName} defeated! All three chapters conquered on the weekly seed.`;
+          ctaButtons = `
+            <button class="btn btn--primary b-end__btn" data-action="boss-finish">BACK TO GAUNTLET</button>`;
         } else {
           // CH3 final boss or run complete
           ctaTitle = "\u2728 RUN COMPLETE \u2728";
@@ -1641,6 +1699,7 @@ export function battleScene(root, opts) {
           <div class="b-end__stats">Final HP ${finalRun.playerHp}/${finalRun.playerMaxHp} -- Gold ${finalRun.totalGoldEarned || finalRun.gold || 0} -- Relics ${(finalRun.relics || []).length}</div>
           ${bossShardLine}
           ${unlockBanner}
+          ${((finalRun.mode || run.mode) === "gauntlet" && state.gauntletProgress) ? `<div class="b-end__gauntlet">⚔️ Gauntlet Score: ${progressLabel(state.gauntletProgress)} · HP ${finalRun.playerHp || 0}${state.gauntletNewBest ? " · 🏆 NEW BEST!" : ""}</div>` : ""}
           ${ctaButtons}
         </div>`;
       }
@@ -2039,7 +2098,10 @@ export function battleScene(root, opts) {
       payoutShards({ run, isCh1BossClear: false });
       mountScene("lobby", root);
     } else if (action === "end-back") {
-      mountScene("lobby", root);
+      // Phase 2 Gauntlet: route back to gauntlet scene, not lobby.
+      const wasGauntlet = (getState().run?.mode || run.mode) === "gauntlet";
+      setState({ run: null });
+      mountScene(wasGauntlet ? "gauntlet" : "lobby", root);
     } else if (action === "select-relic") {
       state.pendingRelicId = t.dataset.relic || null;
       render();
@@ -2074,9 +2136,10 @@ export function battleScene(root, opts) {
           mountScene("lobby", root);
         }
       } else {
-        // Run complete or demo -- discard run, return to lobby.
+        // Run complete or demo -- discard run, return to lobby (or gauntlet).
+        const wasGauntlet = (getState().run?.mode) === "gauntlet";
         setState({ run: null });
-        mountScene("lobby", root);
+        mountScene(wasGauntlet ? "gauntlet" : "lobby", root);
       }
     } else if (action === "runinfo") {
       state.showRunInfo = true;
@@ -2122,6 +2185,10 @@ export function battleScene(root, opts) {
     } else if (action === "confirm") {
       const act = state.pendingAction;
       state.pendingAction = null;
+      // Phase 3: record battle move in moveLog for replay verification.
+      if (run.moveLog) {
+        run.moveLog.push({ t: "battle", floor: run.floor || 1, turn: state.turn, v: act });
+      }
       resolve(act);
       render();
       flushAnims();

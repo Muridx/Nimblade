@@ -46,6 +46,10 @@ export function campfireScene(root) {
     const gold = cur.gold || 0;
     const newRun = { ...cur };
 
+    // Phase 3: log campfire choice.
+    if (cur.moveLog) {
+      cur.moveLog.push({ t: "campfire", floor: cur.floor || 1, v: sceneState.pendingChoice });
+    }
     if (sceneState.pendingChoice === "HEAL") {
       // M5b: Survival T2 forge -- REST bonus on top of the base +35.
       // Forged => +25 extra (so a 100-HP run heals 60 total, mirrors "60%").
@@ -83,6 +87,10 @@ export function campfireScene(root) {
   const resolveSharpen = () => {
     if (!sceneState.pendingAction) return;
     const cur = getState().run || {};
+    // Phase 3: log sharpen sub-pick.
+    if (cur.moveLog) {
+      cur.moveLog.push({ t: "sharpen", floor: cur.floor || 1, v: sceneState.pendingAction });
+    }
     const maxHp = cur.playerMaxHp || 100;
     const hp = cur.playerHp || maxHp;
     const newRun = { ...cur };

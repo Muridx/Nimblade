@@ -121,6 +121,10 @@ export function shopScene(root) {
     const cur = getState().run || {};
     const gold = cur.gold || 0;
     if (gold < item.price) return;
+    // Phase 3: log shop relic purchase.
+    if (cur.moveLog) {
+      cur.moveLog.push({ t: "shop_buy", floor: cur.floor || 1, v: item.relic.id, idx });
+    }
     let newRun = { ...cur, gold: gold - item.price };
     newRun = acquireRelic(newRun, item.relic.id);
     setState({ run: newRun });
@@ -138,6 +142,10 @@ export function shopScene(root) {
     if (want <= 0) return;
     const cost = want * POTION_GOLD_PER_HP;
     if (gold < cost) return;
+    // Phase 3: log potion purchase.
+    if (cur.moveLog) {
+      cur.moveLog.push({ t: "shop_potion", floor: cur.floor || 1, hp: want });
+    }
     const newHp = Math.min(maxHp, hp + want);
     const actuallyHealed = newHp - hp;
     const actualCost = actuallyHealed * POTION_GOLD_PER_HP;

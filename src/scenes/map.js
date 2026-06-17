@@ -254,6 +254,10 @@ export function mapScene(root) {
       pendingNodeId = null;
       const node = run.map.nodes.find((nd) => nd.id === nodeId);
       if (!node) { render(); return; }
+      // Phase 3: log map node selection.
+      if (run.moveLog) {
+        run.moveLog.push({ t: "map", floor: node.floor, v: nodeId });
+      }
       run.currentNodeId = nodeId;
       run.visitedNodeIds.push(nodeId);
       run.floor = node.floor;

@@ -3126,3 +3126,101 @@ body {
 .gaunt__status--err { background: rgba(248,113,113,0.12); border: 1px solid rgba(248,113,113,0.4); color: #fca5a5; }
 .gaunt__hint { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
 .gaunt__locked { margin: 0; font-size: 12px; color: var(--gold-dark); font-weight: 600; }
+
+/* Phase 3: Leaderboard card */
+.gaunt__lb-header {
+  display: grid; grid-template-columns: 36px 1fr 80px 48px;
+  gap: 4px; padding: 4px 6px; font-size: 11px; font-weight: 700;
+  color: var(--gold-dark); text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255,215,0,0.15);
+}
+.gaunt__lb-hcol--name { text-align: left; }
+.gaunt__lb-rows { max-height: 400px; overflow-y: auto; }
+.gaunt__lb-row {
+  display: grid; grid-template-columns: 36px 1fr 80px 48px;
+  gap: 4px; padding: 6px; font-size: 13px; color: #ccc;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.15s;
+}
+.gaunt__lb-row:hover { background: rgba(255,215,0,0.04); }
+.gaunt__lb-row--me {
+  background: rgba(255,215,0,0.08); color: var(--gold);
+  font-weight: 700; border-left: 3px solid var(--gold);
+}
+.gaunt__lb-rank { text-align: center; font-weight: 700; color: var(--gold-dark); }
+.gaunt__lb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gaunt__lb-prog { text-align: right; font-size: 12px; }
+.gaunt__lb-hp { text-align: right; font-size: 12px; }
+.gaunt__lb-refresh {
+  margin-top: 10px; width: 100%; font-size: 13px;
+}
+.gaunt__lb-loading { text-align: center; padding: 16px 0; }
+
+/* Prize pool / entry count */
+.gaunt__pool {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; margin: 10px 0 6px;
+  background: rgba(255,215,0,0.06); border: 1px solid rgba(255,215,0,0.15);
+  border-radius: 8px;
+}
+.gaunt__pool-label { font-size: 13px; color: #ccc; font-weight: 600; }
+.gaunt__pool-value { font-size: 18px; font-weight: 700; color: var(--gold); }
+.gaunt__pool-info {
+  margin: 0 0 8px; font-size: 11px; color: #888; text-align: center;
+}
+
+/* Reward claim banner */
+.gaunt__card--reward {
+  background: linear-gradient(135deg, rgba(255,215,0,0.12), rgba(255,165,0,0.08));
+  border: 1px solid var(--gold); animation: gaunt-reward-pulse 2s ease-in-out infinite;
+}
+@keyframes gaunt-reward-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(255,215,0,0.15); }
+  50% { box-shadow: 0 0 20px rgba(255,215,0,0.3); }
+}
+.gaunt__reward-text { font-size: 14px; color: #eee; margin: 6px 0 12px; }
+.gaunt__claim-btn { width: 100%; font-size: 15px; }
+
+/* Last week winners */
+.gaunt__lw-row {
+  display: grid; grid-template-columns: 36px 1fr 64px;
+  gap: 4px; padding: 6px; font-size: 13px; color: #ccc;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.gaunt__lw-rank { text-align: center; }
+.gaunt__lw-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gaunt__lw-gems { text-align: right; font-weight: 700; color: var(--gold); }
+
+/* Phase 2: weekly seed info + enter button + best score */
+.gaunt__week-info {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; border-radius: 10px;
+  background: rgba(212,166,87,0.08);
+  border: 1px solid rgba(212,166,87,0.2);
+}
+.gaunt__week-label { font-size: 13px; font-weight: 700; color: var(--fg); }
+.gaunt__week-seed { font-size: 12px; font-weight: 600; color: var(--muted); font-family: monospace; }
+.gaunt__enter-btn {
+  font-size: 15px !important; font-weight: 800 !important;
+  letter-spacing: 0.06em;
+  padding: 14px 16px !important;
+}
+.gaunt__best {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.gaunt__best-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.gaunt__best-row:last-child { border-bottom: none; }
+.gaunt__best-label { font-size: 13px; color: var(--muted); }
+.gaunt__best-value { font-size: 13px; font-weight: 700; color: var(--fg); }
+
+/* Phase 2: gauntlet score line in battle end overlay */
+.b-end__gauntlet {
+  margin-top: 4px;
+  font-size: 14px; font-weight: 700;
+  color: var(--gold);
+  text-align: center;
+}

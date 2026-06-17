@@ -61,6 +61,10 @@ export function bloodAltarScene(root) {
     if (sceneState.resolved || sceneState.selected === null) return;
     const cur = getState().run || {};
     if (!canPay(cur)) return;
+    // Phase 3: log altar choice.
+    if (cur.moveLog) {
+      cur.moveLog.push({ t: "altar", floor: cur.floor || 1, v: sceneState.selected });
+    }
     // Pay entry cost (applies to both options).
     let newRun = {
       ...cur,

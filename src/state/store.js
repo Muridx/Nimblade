@@ -3,7 +3,7 @@
   *
   * run shape (post 2.7a):
   * {
-  *   mode: "demo" | "full",
+  *   mode: "demo" | "full" | "gauntlet",
   *   weapon: "sword" | "spear" | "axe" | "staff",
   *   chapter: "CH1",
   *   floor: 1..9,            // current floor number

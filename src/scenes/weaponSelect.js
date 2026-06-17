@@ -197,7 +197,12 @@ export function weaponSelectScene(root) {
       // Safety: don't let a still-locked weapon start a run (shouldn't be
       // possible via UI, but defend against state edge-cases).
       if (!isUnlocked(selected)) return;
-      setState({ run: { ...getState().run, weapon: selected } });
+      // Phase 3: log weapon selection.
+      const curRun = getState().run;
+      if (curRun && curRun.moveLog) {
+        curRun.moveLog.push({ t: "weapon", v: selected });
+      }
+      setState({ run: { ...curRun, weapon: selected } });
       console.log(`[run] start mode=${run.mode} weapon=${selected}`);
       mountScene("map", root);
       return;

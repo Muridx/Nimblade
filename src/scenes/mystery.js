@@ -55,6 +55,10 @@ export function mysteryScene(root) {
       if (resolved) return;
       const cur = getState().run;
       if (event.primary.isDisabled && event.primary.isDisabled(cur, ctx)) return;
+      // Phase 3: log mystery decision.
+      if (cur && cur.moveLog) {
+        cur.moveLog.push({ t: "mystery", floor: cur.floor || 1, event: event.id, v: "accept" });
+      }
       const result = event.primary.apply(cur, ctx);
       setState({ run: result.run });
       resolved = true;
@@ -72,6 +76,10 @@ export function mysteryScene(root) {
       if (resolved) return;
       const cur = getState().run;
       if (event.secondary && event.secondary.isDisabled && event.secondary.isDisabled(cur, ctx)) return;
+      // Phase 3: log mystery secondary decision.
+      if (cur && cur.moveLog) {
+        cur.moveLog.push({ t: "mystery", floor: cur.floor || 1, event: event.id, v: "secondary" });
+      }
       if (event.secondary && event.secondary.apply) {
         const result = event.secondary.apply(cur, ctx);
         setState({ run: result.run });

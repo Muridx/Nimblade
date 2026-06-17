@@ -1139,7 +1139,7 @@ function showToast(root, title, body) {
   (lobby || root).appendChild(el);
 }
 
-function freshRun(mode) {
+export function freshRun(mode, seedOverride) {
   // M5a: read meta forge ownership and bake the 4 run-init bonuses in.
   // We do this BEFORE constructing the run object so HP/gold/energy already
   // reflect the upgrade tree the first time freshRun's value is read.
@@ -1156,7 +1156,13 @@ function freshRun(mode) {
   // SEED migration: seed the per-run PRNG ONCE here, store run.seed for the
   // leaderboard record + Phase C server replay. All gameplay randomness
   // (map, combat, rewards, events) now draws from this single seeded stream.
-  rngSeed();
+  // Phase 2 Gauntlet: when seedOverride is provided (weekly shared seed),
+  // use it so every player gets the exact same run that week.
+  if (seedOverride != null) {
+    rngSeed(seedOverride);
+  } else {
+    rngSeed();
+  }
   let run = {
     mode,
     seed: rngGetSeed(),
@@ -1180,6 +1186,9 @@ function freshRun(mode) {
     map: generateMap(undefined, ascLevel),
     currentNodeId: null,
     visitedNodeIds: [],
+    // Phase 3: move log for gauntlet anti-cheat replay. Only allocated for
+    // gauntlet runs to avoid memory overhead on casual play.
+    moveLog: mode === "gauntlet" ? [] : null,
   };
 
   // M5a: survival_t3 -- free starter relic. Pick a weighted-random common

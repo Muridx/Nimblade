@@ -112,7 +112,8 @@ export function payoutShards({ run, isCh1BossClear = false } = {}) {
   if (!run) return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false };
   // DEMO MODE: demo runs are wallet-free trials and must NEVER earn shards or
   // unlock progression -- otherwise players farm shards in demo with OP weapons.
-  // Real (wallet-connected) runs use mode "full". Gate here = single source of truth.
+  // Real (wallet-connected) runs use mode "full" or "gauntlet". Gate here =
+  // single source of truth. Gauntlet earns shards (players paid gems to enter).
   if (run.mode === "demo") {
     run.shardsPaidOut = true;
     return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false, demo: true };

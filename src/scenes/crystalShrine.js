@@ -57,6 +57,10 @@ export function crystalShrineScene(root) {
     const cur = getState().run || {};
     const gold = cur.gold || 0;
     if (gold < COST) return; // can't afford
+    // Phase 3: log shrine choice.
+    if (cur.moveLog) {
+      cur.moveLog.push({ t: "shrine", floor: cur.floor || 1, v: sceneState.selected });
+    }
     let newRun = { ...cur, gold: gold - COST };
     const owned = newRun.relics || [];
     let text = "";

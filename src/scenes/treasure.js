@@ -69,6 +69,10 @@ export function treasureScene(root) {
     const r = sceneState.relics[idx];
     if (!r) return;
     const cur = getState().run || {};
+    // Phase 3: log treasure claim.
+    if (cur.moveLog) {
+      cur.moveLog.push({ t: "treasure", floor: cur.floor || 1, v: r.id, idx });
+    }
     const newRun = acquireRelic(cur, r.id);
     setState({ run: newRun });
     sceneState.claimedIdxs.push(idx);
