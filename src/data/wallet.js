@@ -35,7 +35,7 @@ import { getState, setState } from "../state/store.js";
 
 // --- Config -------------------------------------------------------------
 const DEV_HUB = true; // DEV-ONLY browser wallet. Set false for public launch.
-const HUB_NETWORK = "test"; // "test" = testnet (free fake NIM) | "main" = mainnet (real NIM)
+const HUB_NETWORK = "main"; // "test" = testnet (free fake NIM) | "main" = mainnet (real NIM)
 const HUB_ENDPOINT =
   HUB_NETWORK === "main" ? "https://hub.nimiq.com" : "https://hub.nimiq-testnet.com";
 const APP_NAME = "Nimblade";

@@ -549,7 +549,7 @@ function render(root) {
         A <strong>free</strong> weekly skill tournament. Every player faces the
         <strong>same monsters, relics and events</strong> that week (a shared seed),
         so the leaderboard is decided by skill &mdash; not luck. <strong>Top 3</strong>
-        win NIM prizes every week, funded by the developer!
+        win GEMS prizes every week, funded by the developer!
       </p>
 
       ${rewardBanner}
