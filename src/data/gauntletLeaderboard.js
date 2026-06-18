@@ -72,9 +72,10 @@ export async function fetchWeeklyLeaderboard(weekNum, limit = 20) {
   if (!isSupabaseReady()) return [];
   try {
     const sb = getSupabase();
+    // Use the safe view (no device_id exposed) — 006 migration
     const { data, error } = await sb
-      .from("gauntlet_scores")
-      .select("id, device_id, display_name, weapon, progress, hp, created_at")
+      .from("gauntlet_leaderboard")
+      .select("id, wallet_addr, display_name, weapon, progress, hp, created_at")
       .eq("week_num", weekNum)
       .order("progress", { ascending: false })
       .order("hp", { ascending: false })

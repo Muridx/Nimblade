@@ -149,27 +149,48 @@ export async function cashoutGems(walletAddr, gemAmount) {
   return result;
 }
 
-// ── 5. Buy gems (credit after NIM payment) ─────────────────────────────────
+// ── 5. Buy gems (verified on-chain via Edge Function) ──────────────────────
 /**
- * Credit gems after NIM payment. Rate: 1 NIM = 1 gem.
- * tx_hash prevents double-credit.
+ * Credit gems after NIM payment. Calls verify-purchase Edge Function which:
+ *   1. Queries the Nimiq blockchain to verify the tx exists
+ *   2. Validates recipient = purchase wallet, amount > 0, confirmed
+ *   3. Credits gems server-side (service_role only)
+ *
+ * tx_hash is REQUIRED — no more client-trusted credit.
  *
  * @param {string} walletAddr
- * @param {number} nimPaid - NIM amount paid
- * @param {string} txHash - Blockchain transaction hash
+ * @param {number} nimPaid - NIM amount paid (display only, server verifies on-chain)
+ * @param {string} txHash - Blockchain transaction hash (REQUIRED)
  * @returns {{ ok, gems_credited, nim_paid }}
  */
 export async function buyGemsCredit(walletAddr, nimPaid, txHash) {
   if (!walletAddr) return { ok: false, error: "wallet_required" };
-  const result = await _rpc("buy_gems_credit", {
-    p_wallet:  walletAddr,
-    p_nim:     nimPaid,
-    p_tx_hash: txHash,
-  });
-  if (result.ok) {
-    await fetchBalances(walletAddr);
+  if (!txHash) return { ok: false, error: "tx_hash_required" };
+
+  if (!isSupabaseReady()) {
+    return { ok: false, error: "supabase_offline" };
   }
-  return result;
+
+  try {
+    const sb = getSupabase();
+    const { data, error } = await sb.functions.invoke("verify-purchase", {
+      body: { tx_hash: txHash, wallet_addr: walletAddr },
+    });
+
+    if (error) {
+      console.warn("[economy] verify-purchase error:", error);
+      return { ok: false, error: error.message || "verification_failed" };
+    }
+
+    const result = data || { ok: false, error: "empty_response" };
+    if (result.ok) {
+      await fetchBalances(walletAddr);
+    }
+    return result;
+  } catch (e) {
+    console.warn("[economy] verify-purchase threw:", e);
+    return { ok: false, error: String(e?.message || e) };
+  }
 }
 
 // ── 6. Spend shards (forge upgrades) ───────────────────────────────────────
