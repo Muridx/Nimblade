@@ -10,6 +10,7 @@ import { mysteryScene } from "./mystery.js";
 import { crystalShrineScene } from "./crystalShrine.js";
 import { bloodAltarScene } from "./bloodAltar.js";
 import { gauntletScene } from "./gauntlet.js";
+import { exchangeScene } from "./exchange.js";
 
 const scenes = {
   splash: splashScene,
@@ -24,6 +25,7 @@ const scenes = {
   crystal_shrine: crystalShrineScene,
   blood_altar: bloodAltarScene,
   gauntlet: gauntletScene,
+  exchange: exchangeScene,
 };
 
 let currentUnmount = null;

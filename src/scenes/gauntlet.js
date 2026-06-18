@@ -1,39 +1,23 @@
 /*
  * NIMBLADE -- Weekly Gauntlet scene.
  *
- * Reached from the lobby (GAUNTLET button under TRY DEMO). This is the home of
- * the competitive, wallet-gated mode:
+ * FREE weekly skill tournament with developer-funded gem prizes.
  *
- *   PHASE 1 (shipped):
- *     - Explains what the Weekly Gauntlet is.
- *     - NIM -> gem exchange (ONE WAY). Buying gems calls wallet.sendNim() to the
- *       project wallet. Gems are credited to meta.gems ONLY on a confirmed tx.
+ * Economy (all server-authoritative via src/data/economy.js):
+ *   - Entry: FREE (no gem cost)
+ *   - NIM → gem exchange: 1 NIM = 1 gem (buy rate)
+ *   - Gem → NIM cashout:  2 gems = 1 NIM (sell rate, 2x spread)
+ *   - Shard → gem conversion: 100 shards = 1 gem
+ *   - Weekly top 3 prizes: 1200/720/480 gems (funded by developer)
  *
- *   PHASE 2 (shipped):
- *     - Weekly shared-seed Gauntlet run. Every player faces the same monsters,
- *       relics, events, and enemy move-rolls that week. Seed auto-derives from
- *       the Monday-aligned week number.
- *     - ENTER GAUNTLET: spend 2 gems -> start a gauntlet-mode run on the weekly
- *       seed -> weapon select -> play all 3 chapters.
- *     - Your Best This Week: locally stored personal best (progress + HP).
- *       Resets automatically when the week rolls over.
- *     - Ranking: progress (chapter*100 + floor) -> HP remaining -> earliest
- *       submission time.
+ * Anti-cheat: ALL balances tracked server-side in Supabase (player_balances).
+ *   - Gem purchases credit via buy_gems_credit() RPC with tx_hash dedup.
+ *   - Shard credits via credit_run_shards() RPC with run_id dedup.
+ *   - Cashout via cashout_gems() RPC with server balance validation.
+ *   - Client meta.gems / meta.shards are display cache only.
  *
- *   PHASE 3 (this version):
- *     - Supabase weekly leaderboard (top 20, highlights own scores).
- *     - Auto-submit gauntlet scores to Supabase from battle.js.
- *     - Move log recording for future anti-cheat replay.
- *     - Prize pool system: entry gems fund the weekly pool, top 3 split it.
- *     - Reward claim: winners see a claim banner and receive gems.
- *
- * IMPORTANT: NIM transactions only work INSIDE the Nimiq Pay host. In a plain
- * browser (Vercel preview) connectWallet()/sendNim() fail gracefully with a
- * friendly message -- buying gems can only be verified inside Nimiq Pay.
- *
- * gem -> NIM cash-out is deliberately NOT built here. It is held until Nimiq
- * gives compliance greenlight (+ KYC/geo), because letting gems convert back to
- * real NIM would re-introduce a cash prize (gambling/money-transmitter risk).
+ * NIM transactions only work INSIDE the Nimiq Pay host. In a plain
+ * browser (Vercel preview) connectWallet()/sendNim() fail gracefully.
  */
 
 import { mountScene } from "./sceneManager.js";
@@ -48,20 +32,27 @@ import {
 import { freshRun } from "./lobby.js";
 import {
   fetchWeeklyLeaderboard,
-  incrementPool,
-  fetchPool,
   fetchMyReward,
   claimReward,
   calculateAndInsertRewards,
   fetchRewards,
 } from "../data/gauntletLeaderboard.js";
 import { getDeviceId } from "../data/leaderboard.js";
+import {
+  buyGemsCredit,
+  cashoutGems,
+  fetchBalances,
+  convertShardsToGems,
+  GEMS_PER_NIM_IN,
+  GEMS_PER_NIM_OUT,
+  SHARDS_PER_GEM,
+} from "../data/economy.js";
 
 
 // --- Config -------------------------------------------------------------
 const GAUNTLET_WALLET = "NQ35 BMRD H1CX 91AY 7XKE EAXU HNH6 1906 S9DX";
-const GEM_PER_NIM = 2;
-const ENTRY_COST = 2;
+const GEM_PER_NIM = GEMS_PER_NIM_IN; // 1 NIM = 1 gem (buy rate, server-enforced)
+const ENTRY_COST = 0; // FREE entry (no gem cost)
 const BUNDLES = [
   { nim: 1, gem: 1 * GEM_PER_NIM },
   { nim: 5, gem: 5 * GEM_PER_NIM },
@@ -195,14 +186,19 @@ export function gauntletScene(root) {
 
   warmupWallet();
 
+  // Sync server balances on mount (anti-cheat: server is source of truth)
+  if (isConnected()) {
+    fetchBalances(getAddress()).catch(() => {});
+  }
+
   const weekNum = getWeekNumber();
   const lastWeekNum = weekNum - 1;
 
-  // Parallel data fetch: leaderboard, device ID, pool, last week rewards + claim check.
+  // Parallel data fetch: leaderboard, device ID, last week rewards + claim check.
   Promise.all([
     fetchWeeklyLeaderboard(weekNum, 20),
     getDeviceId(),
-    fetchPool(weekNum),
+    Promise.resolve(0), // pool no longer used (free entry)
     // Only calculate last week rewards if lastWeekNum >= 0.
     lastWeekNum >= 0 ? calculateAndInsertRewards(lastWeekNum) : Promise.resolve([]),
   ]).then(async ([scores, deviceId, pool, rewards]) => {
@@ -268,14 +264,24 @@ export function gauntletScene(root) {
       status = null;
       render(root);
 
+      // Step 1: NIM payment via wallet
       const res = await sendNim(GAUNTLET_WALLET, nim, "Nimblade gems");
       busyBundle = null;
 
       if (res.ok) {
-        const meta = getState().meta || {};
-        setState({ meta: { ...meta, gems: (Number(meta.gems) || 0) + gem } });
-        status = { kind: "ok", text: `+${gem} gem added! (paid ${nim} NIM)` };
-        console.log("[gauntlet] gem purchase ok:", { nim, gem, txHash: res.txHash });
+        // Step 2: Credit gems SERVER-SIDE (anti-cheat, prevents double-credit via tx_hash)
+        const walletAddr = getAddress();
+        const creditRes = await buyGemsCredit(walletAddr, nim, res.txHash || null);
+        if (creditRes.ok) {
+          status = { kind: "ok", text: `+${creditRes.gems_credited} gem added! (paid ${nim} NIM)` };
+          console.log("[gauntlet] gem purchase ok (server-credited):", { nim, gems: creditRes.gems_credited, txHash: res.txHash });
+        } else {
+          // Server credit failed but payment went through — update local as fallback
+          const meta = getState().meta || {};
+          setState({ meta: { ...meta, gems: (Number(meta.gems) || 0) + gem } });
+          status = { kind: "ok", text: `+${gem} gem added! (paid ${nim} NIM) — sync pending` };
+          console.warn("[gauntlet] server credit failed, local fallback:", creditRes.error);
+        }
       } else {
         status = { kind: "err", text: res.error || "Payment failed or was cancelled. No gems charged." };
         console.warn("[gauntlet] gem purchase failed:", res.error);
@@ -285,27 +291,18 @@ export function gauntletScene(root) {
     }
 
     if (action === "enter-gauntlet") {
-      const gems = gemBalance();
-      if (gems < ENTRY_COST) {
-        status = { kind: "err", text: `Not enough gems. Need ${ENTRY_COST}, have ${gems}.` };
-        render(root);
-        return;
-      }
       if (!isConnected()) {
         status = { kind: "err", text: "Connect your wallet first." };
         render(root);
         return;
       }
 
-      const meta = getState().meta || {};
-      setState({ meta: { ...meta, gems: Math.max(0, (Number(meta.gems) || 0) - ENTRY_COST) } });
-
-      // Increment prize pool (fire-and-forget).
-      incrementPool(getWeekNumber(), ENTRY_COST);
+      // ENTRY_COST is 0 (free entry). No gem deduction needed.
+      // If ENTRY_COST > 0 in the future, add gem check + server-side deduction here.
 
       const weeklySeed = getWeeklySeed();
       setState({ run: freshRun("gauntlet", weeklySeed) });
-      console.log("[gauntlet] entering gauntlet run, seed:", weeklySeed, "week:", getWeekNumber());
+      console.log("[gauntlet] entering gauntlet run (free), seed:", weeklySeed, "week:", getWeekNumber());
 
       mountScene("weaponSelect", root);
       return;
@@ -328,22 +325,32 @@ export function gauntletScene(root) {
       return;
     }
 
-    // Claim reward
+    // Claim reward (server credits gems to player_balances)
     if (action === "claim-reward") {
       if (claimingReward || !myUnclaimedReward) return;
+      const walletAddr = getAddress();
+      if (!walletAddr) {
+        status = { kind: "err", text: "Connect your wallet first to claim gems." };
+        render(root);
+        return;
+      }
       claimingReward = true;
       render(root);
-      const gemsWon = await claimReward(myUnclaimedReward.weekNum);
+      const res = await claimReward(myUnclaimedReward.weekNum, walletAddr);
       claimingReward = false;
-      if (gemsWon > 0) {
-        // Credit gems to player.
+      if (res.ok && res.gems > 0) {
+        // Update local meta cache for immediate UI feedback
         const meta = getState().meta || {};
-        setState({ meta: { ...meta, gems: (Number(meta.gems) || 0) + gemsWon } });
-        status = { kind: "ok", text: `🎉 Claimed ${gemsWon} gems! (Rank #${myUnclaimedReward.rank} last week)` };
+        setState({ meta: { ...meta, gems: (Number(meta.gems) || 0) + res.gems } });
+        // Also refresh server balances in background
+        fetchBalances(walletAddr).catch(() => {});
+        status = { kind: "ok", text: `🎉 Claimed ${res.gems} 💎! (Rank #${myUnclaimedReward.rank} last week)` };
         myUnclaimedReward = null;
-        console.log(`[gauntlet] claimed ${gemsWon} gems reward`);
+        console.log(`[gauntlet] claimed ${res.gems} gems reward (server-credited)`);
       } else {
-        status = { kind: "err", text: "Reward already claimed or not found." };
+        status = { kind: "err", text: res.error === "wallet_required"
+          ? "Connect your wallet first to claim gems."
+          : "Reward already claimed or not found." };
         myUnclaimedReward = null;
       }
       render(root);
@@ -468,24 +475,21 @@ function render(root) {
     bestBlock = `<p class="gaunt__hint">No runs yet this week. Enter the Gauntlet to set your score!</p>`;
   }
 
-  // --- Enter button ---
+  // --- Enter button (FREE entry) ---
   let enterBtn;
   if (!connected) {
     enterBtn = `<button class="btn btn--primary gaunt__enter-btn" disabled>CONNECT WALLET FIRST</button>`;
-  } else if (gems < ENTRY_COST) {
-    enterBtn = `<button class="btn btn--primary gaunt__enter-btn" disabled>NOT ENOUGH GEMS (need ${ENTRY_COST} 💎)</button>`;
   } else {
-    enterBtn = `<button class="btn btn--primary gaunt__enter-btn" data-action="enter-gauntlet">⚔️ ENTER GAUNTLET — ${ENTRY_COST} 💎</button>`;
+    enterBtn = `<button class="btn btn--primary gaunt__enter-btn" data-action="enter-gauntlet">⚔️ ENTER GAUNTLET — FREE</button>`;
   }
 
-  // --- Entry count display (pool tracked internally, UI shows entries) ---
-  const totalEntries = ENTRY_COST > 0 ? Math.floor(poolGems / ENTRY_COST) : 0;
+  // --- Tournament prize display (developer-funded, hardcoded) ---
   const poolDisplay = `
     <div class="gaunt__pool">
-      <span class="gaunt__pool-label">Entries This Week</span>
-      <span class="gaunt__pool-value">🎮 ${totalEntries}</span>
+      <span class="gaunt__pool-label">Weekly Gem Prizes</span>
+      <span class="gaunt__pool-value">🏆 2,400 💎 / week</span>
     </div>
-    <p class="gaunt__pool-info">Top 3 split the entry pool: 50% / 30% / 20%</p>`;
+    <p class="gaunt__pool-info">🥇 1,200 💎 · 🥈 720 💎 · 🥉 480 💎 — funded by the developer</p>`;
 
   // --- Phase 3: Leaderboard card ---
   let leaderboardBlock;
@@ -542,10 +546,10 @@ function render(root) {
       </div>
 
       <p class="gaunt__intro">
-        A weekly <strong>skill</strong> tournament. Every player faces the
+        A <strong>free</strong> weekly skill tournament. Every player faces the
         <strong>same monsters, relics and events</strong> that week (a shared seed),
-        so the leaderboard is decided by skill &mdash; not luck. Spend <strong>gems</strong>
-        to enter; climb the board. <strong>Top 3</strong> split the prize pool!
+        so the leaderboard is decided by skill &mdash; not luck. <strong>Top 3</strong>
+        win NIM prizes every week, funded by the developer!
       </p>
 
       ${rewardBanner}
@@ -558,7 +562,7 @@ function render(root) {
         </div>
         ${poolDisplay}
         ${enterBtn}
-        <p class="gaunt__hint">Entry: ${ENTRY_COST} gems (= ${ENTRY_COST / GEM_PER_NIM} NIM). Unlimited retries — chase your best score!</p>
+        <p class="gaunt__hint">Free entry! Unlimited retries — chase your best score!</p>
       </section>
 
       <section class="gaunt__card">
@@ -587,13 +591,7 @@ function render(root) {
       </section>
 
       <section class="gaunt__card">
-        <h2 class="gaunt__card-title">Exchange</h2>
-        ${walletBlock}
-        <p class="gaunt__rate">Rate: <strong>1 NIM = ${GEM_PER_NIM} gem</strong></p>
-        <div class="gaunt__bundles">${bundlesBlock}</div>
-        ${statusBlock}
-        <p class="gaunt__hint">Payments go through Nimiq Pay. Gems are added only after the transaction confirms.</p>
-        <p class="gaunt__locked">🔒 Cash-out (gem → NIM) coming after Nimiq compliance approval.</p>
+        <p class="gaunt__hint" style="text-align:center">Buy gems, convert shards, or cash out? Visit the <strong>Exchange</strong> from the lobby.</p>
       </section>
     </div>
   `;

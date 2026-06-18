@@ -2,7 +2,7 @@
  * NIMBLADE -- run-state helpers.
  *
  * Centralized utilities for run mutations that need to touch multiple fields
- * at once, or that interact with the meta layer. Today (M2) the focus is:
+ * at once, or that interact with the meta layer.
  *
  *   addRunGold(run, amount)
  *     Increment current `run.gold` AND cumulative `run.totalGoldEarned`.
@@ -11,12 +11,16 @@
  *     this -- shop decreases gold balance only, never reduces totalGoldEarned.
  *
  *   payoutShards({ run, isCh1BossClear })
- *     Convert run.totalGoldEarned into meta.shards per Design Doc v1.1 §7.1:
- *       shards = floor(totalGoldEarned * 0.20 * ascensionMultiplier)
- *     Commits the new shard balance to meta and (if isCh1BossClear) flips
- *     meta.ch1Cleared = true so the lobby unlocks Ascension UI. Returns
- *     `{ shardsEarned, ascMultiplier, ch1Unlocked }` so the run-end screen
- *     can display it.
+ *     Convert run.gold (REMAINING BALANCE) into shards:
+ *       shards = floor(run.gold * 0.20 * ascensionMultiplier * shrineMult)
+ *
+ *     Uses remaining gold balance (not cumulative totalGoldEarned) so that
+ *     shop spending reduces shard payout. This creates decision tension:
+ *     spend gold for power now vs save gold for shards later.
+ *
+ *     If wallet is connected & Supabase is online, shards are credited
+ *     SERVER-SIDE via economy.creditRunShards() (anti-cheat). The local
+ *     meta.shards is only a display cache; server is source of truth.
  *
  *     Ascension multiplier (§8.5):
  *       Asc 0 -> 1.00   Asc 1 -> 1.10   Asc 2 -> 1.20
@@ -28,6 +32,8 @@
 import { getState, setState } from "../state/store.js";
 import { NODE_LAYOUTS } from "./floorMap.js";
 import { generateMap } from "./mapGen.js";
+import { creditRunShards, generateRunId } from "./economy.js";
+import { getAddress } from "./wallet.js";
 
 const SHARD_RATIO = 0.20; // §7.1
 
@@ -97,38 +103,64 @@ export function addRunGold(run, amount) {
 }
 
 /**
- * Compute shard payout for a run and commit to meta.
+ * Compute shard payout for a run.
+ *
+ * Uses run.gold (REMAINING BALANCE) — not totalGoldEarned — so shop spending
+ * reduces shard output. Creates decision tension: spend for power now vs
+ * save gold for shards later.
+ *
+ * SYNCHRONOUS for caller convenience (battle.js assigns the return value
+ * immediately). Server-side credit fires as a background promise — callers
+ * don't need to await it.
  *
  * Returns { shardsEarned, ascMultiplier, ch1Unlocked }:
- *   - shardsEarned: integer shards added to meta this call
+ *   - shardsEarned: integer shards added this call (local estimate)
  *   - ascMultiplier: the multiplier used (display-only)
  *   - ch1Unlocked: true if this call flipped meta.ch1Cleared 0->1
  *
- * Idempotent? NO -- caller must only invoke once per run end. We mark the
- * run with `run.shardsPaidOut = true` and refuse to double-pay if called
- * again with the same run object.
+ * Idempotent on client via `run.shardsPaidOut`. Server-side idempotency
+ * via run.runId (credited_runs table).
  */
 export function payoutShards({ run, isCh1BossClear = false } = {}) {
   if (!run) return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false };
-  // DEMO MODE: demo runs are wallet-free trials and must NEVER earn shards or
-  // unlock progression -- otherwise players farm shards in demo with OP weapons.
-  // Real (wallet-connected) runs use mode "full" or "gauntlet". Gate here =
-  // single source of truth. Gauntlet earns shards (players paid gems to enter).
-  if (run.mode === "demo") {
+  // DEMO & GAUNTLET: no shard payout.
+  //   - demo: wallet-free trials, must NEVER earn shards (farm prevention).
+  //   - gauntlet: competitive tournament mode. Reward = NIM prizes (top 3),
+  //     NOT shards. Free entry + shard payout = infinite shard farm exploit.
+  if (run.mode === "demo" || run.mode === "gauntlet") {
     run.shardsPaidOut = true;
-    return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false, demo: true };
+    return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false, noPayoutMode: true };
   }
   if (run.shardsPaidOut) {
     return { shardsEarned: 0, ascMultiplier: 1.0, ch1Unlocked: false };
   }
   const ascLevel = Math.max(0, Math.min(5, Number(run.ascension) || 0));
   const ascMult = ASCENSION_MULT[ascLevel] || 1.0;
-  const totalEarned = Math.max(0, Number(run.totalGoldEarned) || 0);
+  // >>> CHANGED: use run.gold (remaining balance) instead of totalGoldEarned
+  const goldBalance = Math.max(0, Number(run.gold) || 0);
   // R7 Crystal Shrine option C: +50% shard bonus at run end. Stored on the
   // run as `shardBonusMult` (additive, e.g. 0.5 => x1.5 final payout).
   const shrineMult = 1 + Math.max(0, Number(run.shardBonusMult) || 0);
-  const shardsEarned = Math.floor(totalEarned * SHARD_RATIO * ascMult * shrineMult);
+  const shardsEarned = Math.floor(goldBalance * SHARD_RATIO * ascMult * shrineMult);
 
+  // --- Server-side credit (anti-cheat, fire-and-forget) ---
+  const walletAddr = getAddress();
+  if (walletAddr) {
+    // Generate or reuse run ID for idempotency
+    if (!run.runId) run.runId = generateRunId(walletAddr);
+    // Fire as background promise — server is source of truth, local is cache.
+    creditRunShards(walletAddr, goldBalance, ascLevel, shrineMult, run.runId)
+      .then((res) => {
+        if (res?.ok) {
+          console.log(`[shards] server credited ${res.shards_earned} shards (run ${run.runId})`);
+        } else {
+          console.warn("[shards] server credit failed:", res?.error);
+        }
+      })
+      .catch((err) => console.warn("[shards] server credit threw:", err));
+  }
+
+  // --- Local meta update (display cache for immediate UI feedback) ---
   const meta = getState().meta || {};
   let ch1Unlocked = false;
   const patchedMeta = {

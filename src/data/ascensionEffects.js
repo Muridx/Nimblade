@@ -77,6 +77,22 @@ export const ASCENSION_LEVELS = [
   },
 ];
 
+// ── Gauntlet fixed difficulty ────────────────────────────────────────
+// Gauntlet ignores the player's ascension setting and uses its own
+// hard-coded multipliers so every competitor faces the same challenge.
+export const GAUNTLET_SCALING = { hpMult: 2.0, dmgMult: 1.5 };
+
+/**
+ * Apply gauntlet-specific scaling to an enemy definition.
+ * Same clone pattern as applyAscensionToEnemy — never mutates the source.
+ */
+export function applyGauntletScaling(enemyDef) {
+  const patched = { ...enemyDef };
+  patched.hp = Math.max(1, Math.round((enemyDef.hp || 1) * GAUNTLET_SCALING.hpMult));
+  patched.dmg = Math.max(1, Math.round((enemyDef.dmg || 1) * GAUNTLET_SCALING.dmgMult));
+  return patched;
+}
+
 /** Clamp ascension input to [0, 5]. */
 export function clampAsc(lvl) {
   const n = Number(lvl) || 0;

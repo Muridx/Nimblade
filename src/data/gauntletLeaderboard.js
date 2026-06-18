@@ -2,20 +2,22 @@
 //
 // Phase 3: Gauntlet weekly leaderboard — submit, fetch, pool & rewards.
 //
+// ANTI-CHEAT v2:
+//   - submitGauntletScore → server RPC (no direct table insert)
+//   - calculateAndInsertRewards → server RPC (no direct table insert)
+//   - All writes go through SECURITY DEFINER functions
+//   - Server validates progress, HP, move_log, 1-per-device-per-week
+//
 // Uses the same Supabase client and device-id system as leaderboard.js.
 // Every call is a safe no-op when Supabase isn't configured.
 
 import { getSupabase, isSupabaseReady } from "./supabase.js";
 import { getDeviceId, getDisplayName } from "./leaderboard.js";
 
-// --- Prize pool split config ---
-// 50/30/20 for top 3. Edge cases: 1 player = 100%, 2 players = 60/40.
-const SPLITS_3 = [50, 30, 20];
-const SPLITS_2 = [60, 40];
-
 /**
- * Submit a gauntlet run score.
- * Called from battle.js when a gauntlet run ends (death or run complete).
+ * Submit a gauntlet run score via server RPC.
+ * Server validates: progress cap, HP cap, move_log required,
+ * 1 best score per device per week (upserts if better).
  */
 export async function submitGauntletScore(opts) {
   if (!isSupabaseReady()) {
@@ -24,30 +26,38 @@ export async function submitGauntletScore(opts) {
   try {
     const deviceId = await getDeviceId();
     const display = getDisplayName() || "Anonymous";
-    const payload = {
-      device_id:    deviceId,
-      wallet_addr:  opts.walletAddr || null,
-      display_name: display,
-      week_num:     opts.weekNum,
-      week_seed:    opts.weekSeed,
-      progress:     Math.max(0, Math.min(999, opts.progress || 0)),
-      hp:           Math.max(0, opts.hp || 0),
-      weapon:       opts.weapon || "unknown",
-      move_log:     opts.moveLog || null,
-      verified:     false,
-    };
     const sb = getSupabase();
-    const { data, error } = await sb
-      .from("gauntlet_scores")
-      .insert(payload)
-      .select()
-      .single();
+
+    const { data, error } = await sb.rpc("submit_gauntlet_score", {
+      p_device_id:    deviceId,
+      p_wallet_addr:  opts.walletAddr || null,
+      p_display_name: display,
+      p_week_num:     opts.weekNum || 0,
+      p_week_seed:    opts.weekSeed || null,
+      p_progress:     Math.max(0, opts.progress || 0),
+      p_hp:           Math.max(0, opts.hp || 0),
+      p_weapon:       opts.weapon || "unknown",
+      p_move_log:     opts.moveLog || null,
+    });
+
     if (error) {
-      console.warn("[gauntlet-lb] submit failed:", error.message);
+      console.warn("[gauntlet-lb] submit RPC failed:", error.message);
       return { ok: false, error: error.message };
     }
-    console.log("[gauntlet-lb] score submitted:", data.id);
-    return { ok: true, row: data };
+
+    // data is JSONB returned by the RPC
+    const result = (typeof data === "object") ? data : {};
+    if (result.ok === false) {
+      console.warn("[gauntlet-lb] submit rejected:", result.error);
+      return { ok: false, error: result.error || "rejected" };
+    }
+
+    if (result.kept_existing) {
+      console.log("[gauntlet-lb] existing score kept (was better)");
+    } else {
+      console.log("[gauntlet-lb] score submitted:", result.id);
+    }
+    return { ok: true, ...result };
   } catch (e) {
     console.warn("[gauntlet-lb] submit threw:", e);
     return { ok: false, error: String(e && e.message || e) };
@@ -116,7 +126,7 @@ export async function fetchMyBest(weekNum) {
 
 /**
  * Increment the weekly prize pool by `gems` (called on gauntlet entry).
- * Uses a Supabase RPC for atomic upsert.
+ * Uses a Supabase RPC for atomic upsert. Server caps at 100 per call.
  */
 export async function incrementPool(weekNum, gems) {
   if (!isSupabaseReady()) return;
@@ -145,7 +155,7 @@ export async function fetchPool(weekNum) {
       .from("gauntlet_pools")
       .select("total_gems")
       .eq("week_num", weekNum)
-      .single();
+      .maybeSingle();
     if (error || !data) return 0;
     return data.total_gems || 0;
   } catch (_) { return 0; }
@@ -197,92 +207,64 @@ export async function fetchMyReward(weekNum) {
 }
 
 /**
- * Claim a gem reward for the current device. Returns gems_won (> 0) on
- * success, or 0 if already claimed / not found.
+ * Claim a gem reward for the current device.
+ * Server credits gems to player_balances (wallet required).
+ * Returns { ok, gems } — gems > 0 on success.
  */
-export async function claimReward(weekNum) {
-  if (!isSupabaseReady()) return 0;
+export async function claimReward(weekNum, walletAddr) {
+  if (!isSupabaseReady()) return { ok: false, gems: 0, error: "supabase_not_configured" };
+  if (!walletAddr) return { ok: false, gems: 0, error: "wallet_required" };
   try {
     const deviceId = await getDeviceId();
     const sb = getSupabase();
     const { data, error } = await sb.rpc("claim_gauntlet_reward", {
       p_week_num: weekNum,
       p_device_id: deviceId,
+      p_wallet_addr: walletAddr,
     });
     if (error) {
       console.warn("[gauntlet-rewards] claim failed:", error.message);
-      return 0;
+      return { ok: false, gems: 0, error: error.message };
     }
-    const gems = Number(data) || 0;
-    if (gems > 0) console.log(`[gauntlet-rewards] claimed ${gems} gems for week ${weekNum}`);
-    return gems;
-  } catch (_) { return 0; }
+    const result = (typeof data === "object") ? data : {};
+    const gems = Number(result.gems) || 0;
+    if (result.ok && gems > 0) {
+      console.log(`[gauntlet-rewards] claimed ${gems} gems for week ${weekNum} → wallet ${walletAddr}`);
+    }
+    return { ok: !!result.ok, gems, error: result.error || null };
+  } catch (e) {
+    console.warn("[gauntlet-rewards] claim threw:", e);
+    return { ok: false, gems: 0, error: String(e && e.message || e) };
+  }
 }
 
 /**
- * Calculate and insert rewards for a completed week.
- * Should only be called once per week (idempotent — checks if rewards already exist).
+ * Calculate and insert rewards for a completed week via server RPC.
+ * Idempotent — server checks if rewards already exist.
  *
  * @param {number} weekNum - The completed week number
- * @returns {Promise<Array>} - The rewards that were inserted (or existing ones)
+ * @returns {Promise<Array>} - The rewards (existing or newly created)
  */
 export async function calculateAndInsertRewards(weekNum) {
   if (!isSupabaseReady()) return [];
-
-  // Check if rewards already exist for this week.
-  const existing = await fetchRewards(weekNum);
-  if (existing.length > 0) return existing;
-
-  // Fetch pool.
-  const pool = await fetchPool(weekNum);
-  if (pool <= 0) return [];
-
-  // Fetch leaderboard — top scores, deduped per device.
-  const raw = await fetchWeeklyLeaderboard(weekNum, 100);
-  const seen = new Set();
-  const top = [];
-  for (const entry of raw) {
-    if (!seen.has(entry.device_id)) {
-      seen.add(entry.device_id);
-      top.push(entry);
-    }
-    if (top.length >= 3) break;
-  }
-
-  if (top.length === 0) return [];
-
-  // Determine split ratios.
-  let splits;
-  if (top.length === 1) splits = [100];
-  else if (top.length === 2) splits = SPLITS_2;
-  else splits = SPLITS_3;
-
-  // Calculate gem amounts (floor, so total might be ≤ pool; remainder is tiny).
-  const rewards = top.map((entry, i) => ({
-    week_num:     weekNum,
-    rank:         i + 1,
-    device_id:    entry.device_id,
-    display_name: entry.display_name || "Anonymous",
-    gems_won:     Math.floor(pool * splits[i] / 100),
-    claimed:      false,
-  }));
-
-  // Insert rewards.
   try {
     const sb = getSupabase();
-    const { data, error } = await sb
-      .from("gauntlet_rewards")
-      .insert(rewards)
-      .select();
+    const { data, error } = await sb.rpc("calculate_gauntlet_rewards", {
+      p_week_num: weekNum,
+    });
     if (error) {
-      console.warn("[gauntlet-rewards] insert failed:", error.message);
-      // Might be a race condition — rewards already inserted by another client.
+      console.warn("[gauntlet-rewards] calculate RPC failed:", error.message);
+      // Fallback: try fetching existing rewards
       return await fetchRewards(weekNum);
     }
-    console.log(`[gauntlet-rewards] week ${weekNum} rewards inserted:`, data);
-    return data || rewards;
+    const result = (typeof data === "object") ? data : {};
+    if (result.rewards && Array.isArray(result.rewards)) {
+      console.log(`[gauntlet-rewards] week ${weekNum}:`, result.rewards.length, "rewards");
+      return result.rewards;
+    }
+    return [];
   } catch (e) {
-    console.warn("[gauntlet-rewards] insert threw:", e);
+    console.warn("[gauntlet-rewards] calculate threw:", e);
     return [];
   }
 }

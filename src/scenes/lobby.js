@@ -2,14 +2,18 @@ import { mountScene } from "./sceneManager.js";
 import { seed as rngSeed, getSeed as rngGetSeed } from "../data/rng.js";
 import { getState, setState } from "../state/store.js";
 import { generateMap } from "../data/mapGen.js";
-import { connectWallet } from "../data/wallet.js";
+import { connectWallet, isConnected, getAddress } from "../data/wallet.js";
+import { purchaseForgeNode, fetchForgeState, fetchBalances } from "../data/economy.js";
 import { FORGE_NODES } from "../state/store.js";
 import {
   forgeMaxHpBonus,
   forgeStartGoldBonus,
   forgeStartEnergyBonus,
   forgeStarterRelicId,
+  forgeLuckStarterCommonId,
   forgeLuckStarterRareId,
+  forgeReviveEnabled,
+  FORGE_REVIVE_HP,
   describeRunInitEffects,
 } from "../data/forgeEffects.js";
 import { acquireRelic } from "../data/relicEffects.js";
@@ -40,7 +44,7 @@ import {
 // (run difficulty selector, M6).
 //
 // M4 (forge modal): clicking SHARDS chip or FORGE button opens the upgrade
-// tree -- 4 branches x 3 tiers, prereq chain T1->T2->T3, costs 40/100/250.
+// tree -- 4 branches x 5 tiers, prereq chain T1->T2->T3->T4->T5. Costs: 40/100/200/400/800 (survival_t5: 1600).
 // Selection is two-tap (tap card -> PURCHASE button) to prevent misclick on
 // mobile. Once unlocked, nodes show GET emerald check. Effects engine that
 // reads meta.forge during run-init lands in M5.
@@ -125,6 +129,16 @@ export function lobbyScene(root) {
   // prompt's confirm/skip handlers.
   namePromptOpen = !isOnboarded();
   render(root);
+
+  // Sync server state on mount if wallet already connected.
+  if (isConnected()) {
+    const addr = getAddress();
+    if (addr) {
+      fetchBalances(addr).catch(() => {});
+      fetchForgeState(addr).then(() => render(root)).catch(() => {});
+    }
+  }
+
   // Fire-and-forget daily status refresh if wallet connected. Triggers a
   // re-render to show the "!" badge + auto-popup the modal once per day.
   refreshDailyStatus(root, { allowAutoPopup: true });
@@ -153,6 +167,12 @@ export function lobbyScene(root) {
       const res = await connectWallet();
       connecting = false;
       if (res.ok) {
+        // Sync server state: balances + forge ownership
+        const addr = getAddress();
+        if (addr) {
+          fetchBalances(addr).catch(() => {});
+          fetchForgeState(addr).then(() => render(root)).catch(() => {});
+        }
         render(root);
         // P3b: fresh wallet -> fetch daily status so badge + auto-popup work
         // immediately without waiting for a scene re-mount.
@@ -177,9 +197,14 @@ export function lobbyScene(root) {
       mountScene("weaponSelect", root);
       return;
     }
-    // Weekly Gauntlet: dedicated scene (NIM->gem exchange + tournament).
+    // Weekly Gauntlet: dedicated scene (tournament + leaderboard).
     if (action === "open-gauntlet") {
       mountScene("gauntlet", root);
+      return;
+    }
+    // Exchange: dedicated scene (buy gems, convert shards, cash out NIM).
+    if (action === "open-exchange") {
+      mountScene("exchange", root);
       return;
     }
     // M4: open forge modal (real upgrade tree, no more stub).
@@ -196,18 +221,43 @@ export function lobbyScene(root) {
       render(root);
       return;
     }
-    // M4: purchase confirm -- deduct shards, mark node owned, persist.
+    // M4: purchase confirm -- server-validated forge purchase via RPC.
     if (action === "forge-buy") {
       const meta = getState().meta || {};
       const node = FORGE_NODES.find((n) => n.key === forgeSelectedKey);
       if (!node) return;
       const status = nodeStatus(node, meta);
-      if (status !== "affordable") return; // ignore if not actually buyable
-      const newForge = { ...(meta.forge || {}), [node.key]: true };
-      const newShards = Math.max(0, (Number(meta.shards) || 0) - node.cost);
-      setState({ meta: { ...meta, shards: newShards, forge: newForge } });
-      // Stay in modal so player can see updated state + buy next tier.
-      render(root);
+      if (status !== "affordable") return;
+      if (!isConnected()) {
+        showToast(root, "🔒 WALLET REQUIRED", "Connect your wallet to purchase forge upgrades.");
+        return;
+      }
+
+      // Disable button during server call
+      const btn = root.querySelector('[data-action="forge-buy"]');
+      if (btn) { btn.disabled = true; btn.textContent = "⏳ PURCHASING..."; }
+
+      (async () => {
+        const walletAddr = getAddress();
+        const res = await purchaseForgeNode(walletAddr, node.key);
+        if (res.ok) {
+          // Server deducted shards + recorded ownership. Update local state.
+          const freshMeta = getState().meta || {};
+          const newForge = { ...(freshMeta.forge || {}), [node.key]: true };
+          const newShards = Math.max(0, (Number(freshMeta.shards) || 0) - node.cost);
+          setState({ meta: { ...freshMeta, shards: newShards, forge: newForge } });
+        } else {
+          const errMsg = res.error === "insufficient_shards"
+            ? `Not enough shards (have ${res.have}, need ${res.need}).`
+            : res.error === "prereq_not_met"
+            ? `Unlock ${res.need} first.`
+            : res.error === "already_owned"
+            ? "Already owned!"
+            : res.error || "Purchase failed.";
+          showToast(root, "❌ FORGE ERROR", errMsg);
+        }
+        render(root);
+      })();
       return;
     }
     // M4: close forge modal (X button or backdrop).
@@ -573,13 +623,21 @@ function render(root) {
           </div>
         </div>
 
-        <div class="lobby__howto" role="button" tabindex="0" data-action="open-howto">
-          <span class="lobby__howto-icon">\ud83d\udcd6</span>
-          <div class="lobby__howto-text">
-            <div class="lobby__howto-title">HOW TO PLAY</div>
-            <div class="lobby__howto-sub">New here? Learn the duel in 1 min</div>
+        <div class="lobby__howto-row">
+          <div class="lobby__howto lobby__howto--half" role="button" tabindex="0" data-action="open-howto">
+            <span class="lobby__howto-icon">\ud83d\udcd6</span>
+            <div class="lobby__howto-text">
+              <div class="lobby__howto-title">HOW TO PLAY</div>
+              <div class="lobby__howto-sub">Learn the duel</div>
+            </div>
           </div>
-          <span class="lobby__howto-arrow">\u203a</span>
+          <div class="lobby__howto lobby__howto--half lobby__howto--exchange" role="button" tabindex="0" data-action="open-exchange">
+            <span class="lobby__howto-icon">\ud83d\udc8e</span>
+            <div class="lobby__howto-text">
+              <div class="lobby__howto-title">EXCHANGE</div>
+              <div class="lobby__howto-sub">Shards \u00b7 Gems \u00b7 NIM</div>
+            </div>
+          </div>
         </div>
 
         <div class="lobby__cta">
@@ -1030,8 +1088,8 @@ function renderForgeModalHTML(meta) {
     </div>
   `).join("");
 
-  // 3 tier rows, each row has 4 node cards (one per branch).
-  const rows = [1, 2, 3].map((tier) => {
+  // 5 tier rows, each row has 4 node cards (one per branch).
+  const rows = [1, 2, 3, 4, 5].map((tier) => {
     const rowCells = FORGE_BRANCHES.map((b) => {
       const node = FORGE_NODES.find((n) => n.branch === b.key && n.tier === tier);
       if (!node) return `<div class="forge__cell"></div>`;
@@ -1144,12 +1202,14 @@ export function freshRun(mode, seedOverride) {
   // We do this BEFORE constructing the run object so HP/gold/energy already
   // reflect the upgrade tree the first time freshRun's value is read.
   const meta = getState().meta || {};
-  const hpBonus     = forgeMaxHpBonus(meta);       // survival_t1 -> +5
-  const goldBonus   = forgeStartGoldBonus(meta);   // economy_t1  -> +10
-  const energyBonus = forgeStartEnergyBonus(meta); // legacy shim -> always 0 (combat_t3 covers battle-start energy)
+  const hpBonus     = forgeMaxHpBonus(meta);       // survival_t1+t2 -> +5/+15
+  const goldBonus   = forgeStartGoldBonus(meta);   // economy_t1  -> +5
+  const energyBonus = forgeStartEnergyBonus(meta); // legacy shim -> always 0 (combat_t4 covers battle-start energy)
   // M6: Asc 3+ -- start with -10 max HP. Applied AFTER forge bonus so the
   // two stack predictably (e.g. Survival T1 + Asc 3 = +5 - 10 = -5 net).
-  const ascLevel = clampAsc(meta.ascension);
+  // Gauntlet: ignore player's ascension — fixed difficulty via GAUNTLET_SCALING
+  // in ascensionEffects.js (HP ×2.0, DMG ×1.5) applied in battle.js.
+  const ascLevel = mode === "gauntlet" ? 0 : clampAsc(meta.ascension);
   const ascHpPenalty = ascensionMaxHpPenalty(ascLevel);
   const startMaxHp = Math.max(10, 100 + hpBonus - ascHpPenalty);
 
@@ -1191,20 +1251,28 @@ export function freshRun(mode, seedOverride) {
     moveLog: mode === "gauntlet" ? [] : null,
   };
 
-  // M5a: survival_t3 -- free starter relic. Pick a weighted-random common
-  // and route through the standard acquireRelic engine so on-acquire effects
-  // (e.g. dusty_tome's +3 max HP) apply correctly. acquireRelic returns a
-  // NEW run object (immutable-style), so reassign.
+  // Survival T4 — free starter common relic via acquireRelic engine.
   const starterId = forgeStarterRelicId(meta);
   if (starterId) {
     run = acquireRelic(run, starterId);
   }
 
-  // LUCK T3 -- start every run with 1 random RARE relic. Same routing as the
-  // survival_t3 common starter, but draws from the rares pool.
+  // Luck T4 — another starter common relic (stacks with survival_t4).
+  const luckCommonId = forgeLuckStarterCommonId(meta);
+  if (luckCommonId) {
+    run = acquireRelic(run, luckCommonId);
+  }
+
+  // Luck T5 — start with 1 random rare relic.
   const starterRareId = forgeLuckStarterRareId(meta);
   if (starterRareId) {
     run = acquireRelic(run, starterRareId);
+  }
+
+  // Survival T5 — revive counter (1 use per run, 20 HP on death).
+  if (forgeReviveEnabled(meta)) {
+    run.revivesLeft = 1;
+    run.reviveHp = FORGE_REVIVE_HP;
   }
 
   // Debug: log applied effects to console so QA can verify wiring.

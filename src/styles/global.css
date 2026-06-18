@@ -228,6 +228,9 @@ body {
 .lobby__chip--locked { opacity: 0.5; }
 
 /* ----- HOW TO PLAY slim banner (blue-tinted glass) ----- */
+.lobby__howto-row {
+  display: flex; gap: 8px;
+}
 .lobby__howto {
   display: flex; align-items: center; gap: 11px;
   padding: 11px 14px;
@@ -238,11 +241,16 @@ body {
   cursor: pointer; user-select: none;
   transition: transform 0.08s, border-color 0.2s;
 }
+.lobby__howto--half { flex: 1; min-width: 0; gap: 8px; padding: 10px 11px; }
+.lobby__howto--exchange {
+  border-color: rgba(180,140,255,0.35);
+  background: linear-gradient(100deg, rgba(60,40,90,0.45), rgba(18,12,8,0.5));
+}
 .lobby__howto:active { transform: scale(0.98); }
-.lobby__howto-icon { font-size: 22px; }
-.lobby__howto-text { display: flex; flex-direction: column; gap: 1px; }
+.lobby__howto-icon { font-size: 22px; flex-shrink: 0; }
+.lobby__howto-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .lobby__howto-title { font-size: 13px; font-weight: 900; letter-spacing: 0.04em; color: #f4ecd8; }
-.lobby__howto-sub { font-size: 10.5px; color: rgba(190,212,255,0.75); }
+.lobby__howto-sub { font-size: 10.5px; color: rgba(190,212,255,0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lobby__howto-arrow { margin-left: auto; font-size: 18px; color: rgba(190,212,255,0.7); }
 
 /* B (onboarding): first-run name prompt. Reuses .forge__card shell. */
@@ -415,7 +423,12 @@ body {
   .lobby__chips { gap: 6px; }
   .lobby__chip { padding: 7px 2px 5px; }
   .lobby__chip-icon { width: 24px; height: 24px; font-size: 13px; }
+  .lobby__howto-row { gap: 6px; }
   .lobby__howto { padding: 9px 13px; }
+  .lobby__howto--half { padding: 8px 9px; gap: 6px; }
+  .lobby__howto--half .lobby__howto-icon { font-size: 18px; }
+  .lobby__howto--half .lobby__howto-title { font-size: 11.5px; }
+  .lobby__howto--half .lobby__howto-sub { font-size: 9.5px; }
   .lobby__cta { gap: 7px; }
   .lobby__btn-start { padding: 14px; }
   .lobby__btn-start .cta__label { font-size: 18px; }
@@ -3223,4 +3236,191 @@ body {
   font-size: 14px; font-weight: 700;
   color: var(--gold);
   text-align: center;
+}
+
+/* ================================================================
+   EXCHANGE SCENE
+   ================================================================ */
+.ex {
+  max-width: 430px; margin: 0 auto;
+  padding: 16px 16px 32px;
+  display: flex; flex-direction: column; gap: 14px;
+  height: 100dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  color: var(--fg);
+}
+.ex__header {
+  display: flex; align-items: center; gap: 10px;
+}
+.ex__back {
+  all: unset; cursor: pointer;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 700; color: var(--fg);
+  background: rgba(255,255,255,0.06); border-radius: 10px;
+  transition: background 0.15s;
+}
+.ex__back:hover { background: rgba(255,255,255,0.12); }
+.ex__title {
+  font-size: 18px; font-weight: 900; letter-spacing: 0.06em;
+  color: var(--gold);
+}
+.ex__bal {
+  margin-left: auto;
+  display: flex; gap: 10px;
+}
+.ex__bal-item {
+  font-size: 13px; font-weight: 700;
+  padding: 4px 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+}
+.ex__card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.ex__card-title {
+  font-size: 14px; font-weight: 900; letter-spacing: 0.04em;
+  color: var(--fg); margin: 0;
+}
+.ex__rate {
+  font-size: 12px; color: var(--muted); margin: 0;
+}
+.ex__info {
+  font-size: 13px; color: var(--fg); margin: 0;
+}
+.ex__hint {
+  font-size: 11px; color: var(--muted); margin: 0;
+}
+.ex__bundles {
+  display: flex; gap: 8px;
+}
+.ex__bundle {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.08s;
+}
+.ex__bundle:not(:disabled):hover { border-color: var(--gold); }
+.ex__bundle:active { transform: scale(0.97); }
+.ex__bundle:disabled { opacity: 0.45; cursor: not-allowed; }
+.ex__bundle--loading { border-color: var(--gold); opacity: 0.8; }
+.ex__bundle--selected { border-color: var(--gold); background: rgba(255,215,0,0.08); }
+.ex__bundle-gem {
+  font-size: 16px; font-weight: 900; color: var(--gold);
+}
+.ex__bundle-price {
+  font-size: 11px; font-weight: 600; color: var(--muted);
+}
+.ex__action-btn {
+  width: 100%;
+  font-weight: 800; letter-spacing: 0.04em;
+}
+.ex__action-btn--loading { opacity: 0.7; }
+
+/* Confirm bar (buy gems) */
+.ex__confirm {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 12px;
+  background: rgba(255,215,0,0.06);
+  border: 1px solid rgba(255,215,0,0.25);
+  border-radius: 10px;
+}
+.ex__confirm-text {
+  font-size: 13px; color: var(--fg); text-align: center;
+}
+.ex__confirm-btns {
+  display: flex; gap: 8px; width: 100%;
+}
+.ex__confirm-no {
+  flex: 0 0 48px;
+  font-size: 16px; font-weight: 700;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--fg);
+}
+.ex__confirm-yes {
+  flex: 1;
+  font-weight: 800; letter-spacing: 0.04em;
+}
+
+/* Stepper (+/- quantity picker) */
+.ex__stepper {
+  display: flex; align-items: center; gap: 6px;
+  justify-content: center;
+}
+.ex__step-btn {
+  all: unset; cursor: pointer;
+  width: 38px; height: 38px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 900; color: var(--fg);
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 10px;
+  transition: border-color 0.15s, background 0.15s;
+  user-select: none;
+}
+.ex__step-btn:not(:disabled):hover { border-color: var(--gold); background: rgba(255,255,255,0.12); }
+.ex__step-btn:active { transform: scale(0.93); }
+.ex__step-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.ex__step-val {
+  min-width: 72px; text-align: center;
+  font-size: 18px; font-weight: 900; color: var(--gold);
+}
+.ex__step-max {
+  all: unset; cursor: pointer;
+  padding: 6px 12px;
+  font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+  color: var(--gold);
+  background: rgba(255,215,0,0.08);
+  border: 1px solid rgba(255,215,0,0.2);
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.ex__step-max:not(:disabled):hover { background: rgba(255,215,0,0.15); }
+.ex__step-max:disabled { opacity: 0.3; cursor: not-allowed; }
+.ex__step-summary {
+  font-size: 12px; color: var(--muted); text-align: center; margin: 0;
+}
+.ex__status {
+  padding: 10px 14px; border-radius: 10px;
+  font-size: 13px; font-weight: 600;
+  text-align: center;
+}
+.ex__status--ok {
+  background: rgba(80,200,120,0.12);
+  border: 1px solid rgba(80,200,120,0.3);
+  color: #5ee89c;
+}
+.ex__status--err {
+  background: rgba(255,80,80,0.12);
+  border: 1px solid rgba(255,80,80,0.3);
+  color: #ff7070;
+}
+.ex__connect {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+}
+.ex__connect-text {
+  font-size: 13px; color: var(--muted); text-align: center; margin: 0;
+}
+/* Also add .ex to the min-width:600px centering rule */
+@media (min-width: 600px) {
+  .ex {
+    border-left: 1px solid rgba(255,255,255,0.06);
+    border-right: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 0 60px rgba(0,0,0,0.85);
+  }
 }

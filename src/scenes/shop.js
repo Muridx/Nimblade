@@ -5,7 +5,7 @@ import { nodeTypeFor, sceneForNodeType } from "../data/floorMap.js";
 import relicsData from "../data/relics.json" assert { type: "json" };
 import { acquireRelic } from "../data/relicEffects.js";
 import { renderRunInfoModalHTML } from "../ui/runInfoModal.js";
-import { forgeShopDiscount, forgeLuckRareBonus } from "../data/forgeEffects.js";
+import { forgeShopDiscount, forgeLuckRareBonus, forgeLuckEpicBonus, forgePotionCostPerHp } from "../data/forgeEffects.js";
 
 /**
  * Shop scene (2.7b-3 v2): 2 commons + 1 rare + heal potion stepper.
@@ -22,7 +22,10 @@ import { forgeShopDiscount, forgeLuckRareBonus } from "../data/forgeEffects.js";
 const COMMON_SUBTIER_RANK = { strong: 3, standard: 2, junk: 1 };
 const COMMON_PRICE = { strong: 40, standard: 30, junk: 25 };
 const RARE_PRICE_BY_WEIGHT = { 4: 60, 3: 75, 2: 85, 1: 90 };
-const POTION_GOLD_PER_HP = 3;
+const EPIC_PRICE = 120; // flat price for epic relics in shop
+// Base potion cost nerfed to 4g/HP (v2). Economy T5 reduces to 2g/HP.
+// Resolved per-shop from forge meta at scene init.
+let POTION_GOLD_PER_HP = 4;
 
 function weightedPickWithoutReplacement(pool, n) {
   const remaining = [...pool];
@@ -55,56 +58,66 @@ function pickFromPool(pool) {
   return pool.splice(idx, 1)[0];
 }
 
-function rollShopRelics(discount = 0, rareBonus = 0) {
+function rollShopRelics(discount = 0, rareBonus = 0, epicBonus = 0) {
   // Work on copies so without-replacement is shared across the rare slot AND
-  // any common slots that get upgraded to rare (no dup rares).
+  // any common slots that get upgraded to rare/epic (no dup rares).
   const commonsPool = [...(relicsData.commons || [])];
   const raresPool = [...(relicsData.rares || [])];
+  const epicsPool = [...(relicsData.epics || [])];
   // M5b: Economy T2 forge -- apply discount fraction to relic prices.
   // Ceil + min 1g so 1g rare items can't be free-exploited.
   const applyDisc = (p) => Math.max(1, Math.ceil(p * (1 - discount)));
-  const priceFor = (r, isRare) =>
-    applyDisc(isRare ? (RARE_PRICE_BY_WEIGHT[r.weight] || 75) : (COMMON_PRICE[r.subtier] || 30));
+  const priceFor = (r, tier) =>
+    applyDisc(tier === "epic" ? EPIC_PRICE
+      : tier === "rare" ? (RARE_PRICE_BY_WEIGHT[r.weight] || 75)
+      : (COMMON_PRICE[r.subtier] || 30));
 
   // Guaranteed rare slot (always present).
   const guaranteedRare = pickFromPool(raresPool);
 
-  // 2 "common" slots -- LUCK T1 gives EACH a `rareBonus` chance to upgrade to
-  // a rare instead of a common.
+  // 2 "common" slots -- LUCK T3 gives EACH a `epicBonus` chance to upgrade to
+  // epic; LUCK T1 gives a `rareBonus` chance to upgrade to rare. Epic checked first.
   const commonSlots = [];
   for (let i = 0; i < 2; i++) {
+    // Epic upgrade (Luck T3)
+    if (epicBonus > 0 && epicsPool.length > 0 && rngNext() < epicBonus) {
+      const e = pickFromPool(epicsPool);
+      if (e) { commonSlots.push({ relic: e, tier: "epic" }); continue; }
+    }
+    // Rare upgrade (Luck T1)
     if (rareBonus > 0 && raresPool.length > 0 && rngNext() < rareBonus) {
       const r = pickFromPool(raresPool);
-      if (r) { commonSlots.push({ relic: r, rare: true }); continue; }
+      if (r) { commonSlots.push({ relic: r, tier: "rare" }); continue; }
     }
     const c = pickFromPool(commonsPool);
-    if (c) commonSlots.push({ relic: c, rare: false });
+    if (c) commonSlots.push({ relic: c, tier: "common" });
   }
-  // Display order: rares first, then commons by subtier (strong > junk).
+  // Display order: epics first, rares, then commons by subtier (strong > junk).
+  const TIER_RANK = { epic: 3, rare: 2, common: 1 };
   commonSlots.sort((a, b) => {
-    if (a.rare !== b.rare) return a.rare ? -1 : 1;
+    if (a.tier !== b.tier) return (TIER_RANK[b.tier] || 0) - (TIER_RANK[a.tier] || 0);
     return (COMMON_SUBTIER_RANK[b.relic.subtier] || 0) - (COMMON_SUBTIER_RANK[a.relic.subtier] || 0);
   });
 
   const items = commonSlots.map((s) => ({
-    kind: "relic", relic: s.relic, price: priceFor(s.relic, s.rare), sold: false,
+    kind: "relic", relic: s.relic, price: priceFor(s.relic, s.tier), sold: false,
   }));
   if (guaranteedRare) {
-    items.push({ kind: "relic", relic: guaranteedRare, price: priceFor(guaranteedRare, true), sold: false });
+    items.push({ kind: "relic", relic: guaranteedRare, price: priceFor(guaranteedRare, "rare"), sold: false });
   }
   return items;
 }
 
 export function shopScene(root) {
-  // M5b: forge Economy T2 discount, resolved once at scene mount.
-  // (Discount applies to relic items only; potion is integer-gold-per-HP so
-  // it's left untouched for now to keep stepper math clean.)
+  // M5b: forge discounts, resolved once at scene mount.
   const shopMeta = getState().meta || {};
-  const shopDiscount = forgeShopDiscount(shopMeta);
-  // LUCK T1 -- +10% chance each common shop slot upgrades to a rare.
-  const rareBonus = forgeLuckRareBonus(shopMeta);
+  const shopDiscount = forgeShopDiscount(shopMeta);   // Economy T4 → −15%
+  const rareBonus = forgeLuckRareBonus(shopMeta);     // Luck T1 → +5%
+  const epicBonus = forgeLuckEpicBonus(shopMeta);     // Luck T3 → +3%
+  // Economy T5 → potion cost override (2g/HP vs 4g/HP base).
+  POTION_GOLD_PER_HP = forgePotionCostPerHp(shopMeta);
   const sceneState = {
-    items: rollShopRelics(shopDiscount, rareBonus),
+    items: rollShopRelics(shopDiscount, rareBonus, epicBonus),
     selectedIdx: null,
     potionHp: 0, // current stepper value
     showRunInfo: false, // 2.7d batch4: custom modal flag

@@ -15,8 +15,9 @@ import {
   forgeEnergyRegenBonus,
   forgeBattleStartEnergy,
   forgeBattleGoldBonus,
+  forgeBossHealBonus,
 } from "../data/forgeEffects.js";
-import { applyAscensionToEnemy, clampAsc } from "../data/ascensionEffects.js";
+import { applyAscensionToEnemy, applyGauntletScaling, clampAsc } from "../data/ascensionEffects.js";
 import {
   initSpecials,
   isSchemeThisTurn,
@@ -182,7 +183,7 @@ export function battleScene(root, opts) {
   const ultCost = S.ult_cost;
   const dmgForgeBonus = forgeDmgBonus(meta);           // +2 all attacks (combat_t1)
   const energyRegenForge = forgeEnergyRegenBonus(meta); // +5 energy/turn (combat_t2)
-  const battleStartEnergyForge = forgeBattleStartEnergy(meta); // +30e per battle (combat_t3)
+  const battleStartEnergyForge = forgeBattleStartEnergy(meta); // +20e per battle (combat_t4)
   const battleGoldForge = forgeBattleGoldBonus(meta);   // +5g per win (economy_t2)
   const chapterKey = (run.chapter || "CH1").toLowerCase();
   const chapterData = monstersData[chapterKey] || monstersData.ch1;
@@ -271,6 +272,17 @@ export function battleScene(root, opts) {
       dmg: enemyDef.dmg,
       hp: enemyDef.hp,
       honest_pct: enemyDef.honest_pct,
+    });
+  }
+  // Gauntlet: fixed difficulty scaling (HP ×2.0, DMG ×1.5) overrides ascension.
+  // Applied to ALL enemies regardless of type. Ensures every gauntlet player
+  // faces the same challenge independent of their personal ascension setting.
+  if (run.mode === "gauntlet") {
+    const gPatched = applyGauntletScaling(enemyDef);
+    enemyDef = gPatched;
+    console.log(`[gauntlet] scaling applied to ${enemyDef.id}:`, {
+      hp: enemyDef.hp,
+      dmg: enemyDef.dmg,
     });
   }
   // M9: Cursed Chest mystery event sets run.cursedNextBattle. We bump enemy
@@ -541,6 +553,11 @@ export function battleScene(root, opts) {
     newRun.playerMaxHp = state.player.maxHp;
     const heal = healOnBattleWin(newRun);
     if (heal > 0) newRun.playerHp = Math.min(newRun.playerMaxHp, newRun.playerHp + heal);
+    // Survival T3 — Forge boss heal bonus (+5 HP after boss kill).
+    const bossHeal = forgeBossHealBonus(meta);
+    if (bossHeal > 0) {
+      newRun.playerHp = Math.min(newRun.playerMaxHp, newRun.playerHp + bossHeal);
+    }
     newRun.relics = (newRun.relics || []).slice();
     if (took && state.rewardData.autoGrantedRelic) {
       newRun = acquireRelic(newRun, state.rewardData.autoGrantedRelic.id);
@@ -1297,6 +1314,19 @@ export function battleScene(root, opts) {
       }
     }
 
+    // Forge Survival T5 — +1 revive per run at 20 HP.
+    // Fires AFTER Heart of Nimblade so it doesn't consume forge revive first.
+    if (state.player.hp <= 0 && state.enemy.hp > 0) {
+      if ((run.revivesLeft || 0) > 0) {
+        state.player.hp = run.reviveHp || 20;
+        run.revivesLeft -= 1;
+        run.playerHp = state.player.hp;
+        setState({ run });
+        queueFloater("player", run.reviveHp || 20, "heal");
+        state.log.push(`* FORGE REVIVE -- revived at ${run.reviveHp || 20} HP! *`);
+      }
+    }
+
     if (state.enemy.hp <= 0) {
       state.ended = "win";
       state.log.push("* VICTORY *");
@@ -1471,15 +1501,18 @@ export function battleScene(root, opts) {
   };
 
   // 2.7c-2: extend global cheat (defined in main.js) with battle-only commands.
-  window.cheat = window.cheat || {};
-  Object.assign(window.cheat, {
-    energy: (n) => { state.player.energy = n; render(); console.log(`[cheat] energy=${n}`); },
-    enemyHp: (n) => { state.enemy.hp = n; render(); console.log(`[cheat] enemyHp=${n}`); },
-    playerHp: (n) => { state.player.hp = n; render(); console.log(`[cheat] playerHp=${n}`); },
-    win: () => { state.enemy.hp = 0; state.ended = "win"; state.log.push("* CHEAT VICTORY *"); generateReward(); render(); },
-    lose: () => { state.player.hp = 0; state.ended = "lose"; state.log.push("x CHEAT DEFEAT x"); render(); },
-  });
-  console.log("[cheat] battle commands active -- cheat.help()");
+  // DEV-only: Vite strips this block in production builds.
+  if (import.meta.env.DEV) {
+    window.cheat = window.cheat || {};
+    Object.assign(window.cheat, {
+      energy: (n) => { state.player.energy = n; render(); console.log(`[cheat] energy=${n}`); },
+      enemyHp: (n) => { state.enemy.hp = n; render(); console.log(`[cheat] enemyHp=${n}`); },
+      playerHp: (n) => { state.player.hp = n; render(); console.log(`[cheat] playerHp=${n}`); },
+      win: () => { state.enemy.hp = 0; state.ended = "win"; state.log.push("* CHEAT VICTORY *"); generateReward(); render(); },
+      lose: () => { state.player.hp = 0; state.ended = "lose"; state.log.push("x CHEAT DEFEAT x"); render(); },
+    });
+    console.log("[cheat] battle commands active -- cheat.help()");
+  }
 
   const render = () => {
     const intent = state.intent;
@@ -2201,7 +2234,7 @@ export function battleScene(root, opts) {
   return () => {
     root.removeEventListener("click", onClick);
     // 2.7c-2: only strip battle-scoped keys; keep global cheat alive across scenes.
-    if (window.cheat) {
+    if (import.meta.env.DEV && window.cheat) {
       delete window.cheat.energy;
       delete window.cheat.enemyHp;
       delete window.cheat.playerHp;
