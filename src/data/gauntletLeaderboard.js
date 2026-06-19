@@ -33,7 +33,7 @@ export async function submitGauntletScore(opts) {
       p_wallet_addr:  opts.walletAddr || null,
       p_display_name: display,
       p_week_num:     opts.weekNum || 0,
-      p_week_seed:    opts.weekSeed || null,
+      p_week_seed:    opts.weekSeed != null ? String(opts.weekSeed) : null,
       p_progress:     Math.max(0, opts.progress || 0),
       p_hp:           Math.max(0, opts.hp || 0),
       p_weapon:       opts.weapon || "unknown",

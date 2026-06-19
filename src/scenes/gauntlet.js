@@ -50,7 +50,7 @@ import {
 
 
 // --- Config -------------------------------------------------------------
-const GAUNTLET_WALLET = "NQ35 BMRD H1CX 91AY 7XKE EAXU HNH6 1906 S9DX";
+const GAUNTLET_WALLET = "NQ40 TE0Q MVNJ VQ3M MDNJ 3T11 BHBY GYN0 D2VS";
 const GEM_PER_NIM = GEMS_PER_NIM_IN; // 1 NIM = 1 gem (buy rate, server-enforced)
 const ENTRY_COST = 0; // FREE entry (no gem cost)
 const BUNDLES = [
