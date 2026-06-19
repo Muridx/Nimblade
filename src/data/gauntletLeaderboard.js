@@ -188,14 +188,28 @@ export async function fetchRewards(weekNum) {
 }
 
 /**
- * Check if current device has an unclaimed reward for a given week.
+ * Check if current player has an unclaimed reward for a given week.
+ * Uses wallet_addr (secure) with device_id fallback for legacy rewards.
  * Returns { rank, gems_won } or null.
  */
-export async function fetchMyReward(weekNum) {
+export async function fetchMyReward(weekNum, walletAddr) {
   if (!isSupabaseReady()) return null;
   try {
-    const deviceId = await getDeviceId();
     const sb = getSupabase();
+
+    // Primary: check by wallet_addr (secure, non-spoofable)
+    if (walletAddr) {
+      const { data, error } = await sb
+        .from("gauntlet_rewards")
+        .select("rank, gems_won, claimed")
+        .eq("week_num", weekNum)
+        .eq("wallet_addr", walletAddr)
+        .limit(1);
+      if (!error && data && data.length > 0) return data[0];
+    }
+
+    // Fallback: check by device_id (legacy rewards without wallet_addr)
+    const deviceId = await getDeviceId();
     const { data, error } = await sb
       .from("gauntlet_rewards")
       .select("rank, gems_won, claimed")

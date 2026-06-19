@@ -208,9 +208,11 @@ export function gauntletScene(root) {
     lastWeekRewards = rewards || [];
     leaderboardLoading = false;
 
-    // Check if current device has an unclaimed reward from last week.
+    // Check if current player has an unclaimed reward from last week.
+    // Uses wallet_addr (secure) with device_id fallback for legacy rewards.
     if (lastWeekNum >= 0 && lastWeekRewards.length > 0) {
-      const myReward = await fetchMyReward(lastWeekNum);
+      const walletAddr = getAddress();
+      const myReward = await fetchMyReward(lastWeekNum, walletAddr);
       if (myReward && !myReward.claimed && myReward.gems_won > 0) {
         myUnclaimedReward = { weekNum: lastWeekNum, rank: myReward.rank, gems_won: myReward.gems_won };
       }
@@ -498,17 +500,21 @@ function render(root) {
   } else if (leaderboardData.length === 0) {
     leaderboardBlock = `<p class="gaunt__hint">No scores submitted yet this week. Be the first!</p>`;
   } else {
-    // Deduplicate: keep only the best score per device_id.
+    // Deduplicate: keep only the best score per wallet_addr (or id fallback).
+    // NOTE: gauntlet_leaderboard view does NOT expose device_id, so we use
+    // wallet_addr for dedup. Server-side submit already upserts 1-per-device,
+    // so this is a safety net for edge cases.
     const seen = new Set();
     const deduped = [];
     for (const entry of leaderboardData) {
-      if (!seen.has(entry.device_id)) {
-        seen.add(entry.device_id);
+      const key = entry.wallet_addr || entry.id;
+      if (!seen.has(key)) {
+        seen.add(key);
         deduped.push(entry);
       }
     }
     const rows = deduped.map((entry, i) => {
-      const isMe = myDeviceId && entry.device_id === myDeviceId;
+      const isMe = addr && entry.wallet_addr === addr;
       return lbRow(entry, i + 1, isMe);
     }).join("");
     leaderboardBlock = `
