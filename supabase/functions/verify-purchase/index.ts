@@ -8,8 +8,14 @@
  *   1. Client pays NIM via wallet (Nimiq Pay / Hub) → gets txHash
  *   2. Client calls this Edge Function with { tx_hash, wallet_addr }
  *   3. Edge Function queries Nimiq RPC to verify tx exists on-chain
- *   4. Validates: recipient = PURCHASE_WALLET, value > 0, confirmed
+ *   4. Validates: recipient = PURCHASE_WALLET, sender = wallet_addr,
+ *      value > 0, confirmed
  *   5. Credits gems via buy_gems_credit (service_role, not anon)
+ *
+ * SECURITY FIX (v2):
+ *   Now validates that the transaction SENDER matches the wallet_addr
+ *   requesting the gems. Prevents front-running attacks where someone
+ *   monitors the blockchain and claims another player's payment.
  *
  * Required Supabase secrets:
  *   NIMIQ_PURCHASE_WALLET — NQ address where gem purchases go (your dev wallet)
@@ -66,8 +72,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Normalize: remove spaces, uppercase
+    // Normalize: remove spaces/hyphens, uppercase
     const normalizedPurchaseWallet = PURCHASE_WALLET.replace(/[\s-]/g, "").toUpperCase();
+    const normalizedCallerWallet = wallet_addr.replace(/[\s-]/g, "").toUpperCase();
 
     // --- 1. Query Nimiq RPC for the transaction ---
     let txData: any;
@@ -85,8 +92,38 @@ Deno.serve(async (req) => {
     }
 
     // --- 2. Validate transaction ---
+
+    // ── SECURITY FIX: Check SENDER matches the wallet requesting gems ──
+    // Without this, anyone who sees a tx_hash on-chain could front-run the
+    // legitimate buyer and steal their gem credit.
+    const txFrom = (txData.from || txData.sender || txData.fromAddress || "")
+      .replace(/[\s-]/g, "")
+      .toUpperCase();
+    if (!txFrom || txFrom.length < 5) {
+      return jsonResp(
+        {
+          ok: false,
+          error: "tx_sender_unknown",
+          detail: "Could not determine transaction sender from RPC data",
+        },
+        400
+      );
+    }
+    if (txFrom !== normalizedCallerWallet) {
+      return jsonResp(
+        {
+          ok: false,
+          error: "sender_mismatch",
+          detail: "Transaction sender does not match your wallet address. You can only claim gems for transactions you sent.",
+        },
+        403
+      );
+    }
+
     // Check recipient matches purchase wallet
-    const txTo = (txData.to || "").replace(/[\s-]/g, "").toUpperCase();
+    const txTo = (txData.to || txData.recipient || txData.toAddress || "")
+      .replace(/[\s-]/g, "")
+      .toUpperCase();
     if (txTo !== normalizedPurchaseWallet) {
       return jsonResp(
         {

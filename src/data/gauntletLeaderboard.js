@@ -8,6 +8,12 @@
 //   - All writes go through SECURITY DEFINER functions
 //   - Server validates progress, HP, move_log, 1-per-device-per-week
 //
+// SECURITY v3 (migration 010):
+//   - fetchMyBest → server RPC (no direct table SELECT)
+//   - fetchRewards → server RPC (no device_id in output)
+//   - fetchMyReward → server RPC (wallet + device_id lookup)
+//   - gauntlet_scores & gauntlet_rewards: anon SELECT blocked
+//
 // Uses the same Supabase client and device-id system as leaderboard.js.
 // Every call is a safe no-op when Supabase isn't configured.
 
@@ -94,6 +100,7 @@ export async function fetchWeeklyLeaderboard(weekNum, limit = 20) {
 
 /**
  * Fetch the current player's best score for a given week.
+ * Uses server RPC (migration 010) — no direct table query.
  * Returns null if no score found.
  */
 export async function fetchMyBest(weekNum) {
@@ -101,20 +108,23 @@ export async function fetchMyBest(weekNum) {
   try {
     const deviceId = await getDeviceId();
     const sb = getSupabase();
-    const { data, error } = await sb
-      .from("gauntlet_scores")
-      .select("id, progress, hp, weapon, created_at")
-      .eq("week_num", weekNum)
-      .eq("device_id", deviceId)
-      .order("progress", { ascending: false })
-      .order("hp", { ascending: false })
-      .order("created_at", { ascending: true })
-      .limit(1);
+    const { data, error } = await sb.rpc("get_my_best_gauntlet_score", {
+      p_device_id: deviceId,
+      p_week_num:  weekNum,
+    });
     if (error) {
-      console.warn("[gauntlet-lb] fetchMyBest failed:", error.message);
+      console.warn("[gauntlet-lb] fetchMyBest RPC failed:", error.message);
       return null;
     }
-    return (data && data.length > 0) ? data[0] : null;
+    const result = (typeof data === "object") ? data : {};
+    if (!result.ok || !result.found) return null;
+    return {
+      id:         result.id,
+      progress:   result.progress,
+      hp:         result.hp,
+      weapon:     result.weapon,
+      created_at: result.created_at,
+    };
   } catch (e) {
     console.warn("[gauntlet-lb] fetchMyBest threw:", e);
     return null;
@@ -168,56 +178,51 @@ export async function fetchPool(weekNum) {
 
 /**
  * Fetch rewards for a given week (populated or empty).
- * Returns array of { rank, device_id, display_name, gems_won, claimed }.
+ * Uses server RPC (migration 010) — no device_id exposed.
+ * Returns array of { rank, display_name, gems_won, claimed }.
  */
 export async function fetchRewards(weekNum) {
   if (!isSupabaseReady()) return [];
   try {
     const sb = getSupabase();
-    const { data, error } = await sb
-      .from("gauntlet_rewards")
-      .select("rank, device_id, display_name, gems_won, claimed")
-      .eq("week_num", weekNum)
-      .order("rank", { ascending: true });
+    const { data, error } = await sb.rpc("get_week_rewards", {
+      p_week_num: weekNum,
+    });
     if (error) {
-      console.warn("[gauntlet-rewards] fetch failed:", error.message);
+      console.warn("[gauntlet-rewards] fetch RPC failed:", error.message);
       return [];
     }
-    return data || [];
+    // data is a JSONB array
+    return Array.isArray(data) ? data : [];
   } catch (_) { return []; }
 }
 
 /**
  * Check if current player has an unclaimed reward for a given week.
- * Uses wallet_addr (secure) with device_id fallback for legacy rewards.
- * Returns { rank, gems_won } or null.
+ * Uses server RPC (migration 010) — wallet_addr primary, device_id fallback.
+ * Returns { rank, gems_won, claimed } or null.
  */
 export async function fetchMyReward(weekNum, walletAddr) {
   if (!isSupabaseReady()) return null;
   try {
-    const sb = getSupabase();
-
-    // Primary: check by wallet_addr (secure, non-spoofable)
-    if (walletAddr) {
-      const { data, error } = await sb
-        .from("gauntlet_rewards")
-        .select("rank, gems_won, claimed")
-        .eq("week_num", weekNum)
-        .eq("wallet_addr", walletAddr)
-        .limit(1);
-      if (!error && data && data.length > 0) return data[0];
-    }
-
-    // Fallback: check by device_id (legacy rewards without wallet_addr)
     const deviceId = await getDeviceId();
-    const { data, error } = await sb
-      .from("gauntlet_rewards")
-      .select("rank, gems_won, claimed")
-      .eq("week_num", weekNum)
-      .eq("device_id", deviceId)
-      .limit(1);
-    if (error || !data || data.length === 0) return null;
-    return data[0];
+    const sb = getSupabase();
+    const { data, error } = await sb.rpc("get_my_gauntlet_reward", {
+      p_device_id:   deviceId,
+      p_week_num:    weekNum,
+      p_wallet_addr: walletAddr || null,
+    });
+    if (error) {
+      console.warn("[gauntlet-rewards] fetchMyReward RPC failed:", error.message);
+      return null;
+    }
+    const result = (typeof data === "object") ? data : {};
+    if (!result.ok || !result.found) return null;
+    return {
+      rank:     result.rank,
+      gems_won: result.gems_won,
+      claimed:  result.claimed,
+    };
   } catch (_) { return null; }
 }
 
