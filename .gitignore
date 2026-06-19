@@ -7,3 +7,4 @@ dist/
 .vite/
 .vercel/
 supabase/.temp
+supabase/.temp/linked-project.json
